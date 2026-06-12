@@ -26,26 +26,65 @@ const MACHINE_NAME = "";
 // ==============================
 
 const CACHE_FILE = "cc_usage_cache.json";
+const HISTORY_CACHE_FILE = "cc_usage_history_cache.json";
 
 // ---------- 資料 ----------
 
-async function loadPayloads() {
+async function fetchJsonCached(url, cacheName) {
   const fm = FileManager.local();
-  const cachePath = fm.joinPath(fm.libraryDirectory(), CACHE_FILE);
-  let data = null;
+  const cachePath = fm.joinPath(fm.libraryDirectory(), cacheName);
   try {
-    const req = new Request(GIST_RAW_URL + "?t=" + Date.now()); // 破 CDN 快取
+    const req = new Request(url + "?t=" + Date.now()); // 破 CDN 快取
     req.timeoutInterval = 10;
-    data = await req.loadJSON();
+    const data = await req.loadJSON();
     fm.writeString(cachePath, JSON.stringify(data));
+    return data;
   } catch (e) {
     if (fm.fileExists(cachePath)) {
-      try { data = JSON.parse(fm.readString(cachePath)); } catch (e2) {}
+      try { return JSON.parse(fm.readString(cachePath)); } catch (e2) {}
     }
+    return null;
   }
+}
+
+async function loadPayloads() {
+  const data = await fetchJsonCached(GIST_RAW_URL, CACHE_FILE);
   if (!data) return [];
   if (Array.isArray(data)) return data.filter(p => p && p.claude_code !== undefined);
   return data.claude_code !== undefined ? [data] : [];
+}
+
+async function loadHistory() {
+  const url = GIST_RAW_URL.replace(/usage\.json$/, "history.json");
+  const data = await fetchJsonCached(url, HISTORY_CACHE_FILE);
+  return Array.isArray(data) ? data : [];
+}
+
+// 燒速率：最近 60 分鐘 5hr% 線性擬合 -> 預估幾分鐘後達 100%（不會達則回 null）
+function burnEtaMinutes(history, machine, currentP5, resetsAt) {
+  if (currentP5 == null) return null;
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  const pts = history
+    .filter(e => e && e.m === machine && typeof e.h5 === "number")
+    .map(e => ({ t: new Date(e.t).getTime(), v: e.h5 }))
+    .filter(p => isFinite(p.t) && p.t >= cutoff);
+  if (pts.length < 3) return null;
+  const n = pts.length;
+  const mt = pts.reduce((s, p) => s + p.t, 0) / n;
+  const mv = pts.reduce((s, p) => s + p.v, 0) / n;
+  let num = 0, den = 0;
+  for (const p of pts) { num += (p.t - mt) * (p.v - mv); den += (p.t - mt) ** 2; }
+  if (!den) return null;
+  const slopePerMin = (num / den) * 60000;
+  if (slopePerMin < 0.05) return null;
+  const eta = (100 - currentP5) / slopePerMin;
+  const resetMin = resetsAt ? (new Date(resetsAt).getTime() - Date.now()) / 60000 : Infinity;
+  return eta < resetMin ? eta : null; // 重置前不會達上限就不顯示
+}
+
+function fmtMinutes(m) {
+  if (m < 60) return Math.round(m) + "m";
+  return Math.floor(m / 60) + "h" + Math.round(m % 60) + "m";
 }
 
 function pickPayload(payloads) {
@@ -281,7 +320,7 @@ function addHeader(widget, p, stale, label) {
 }
 
 // (D) 主畫面 small：彩色環形 gauge + Weekly
-function renderSmall(widget, p) {
+function renderSmall(widget, p, etaMin) {
   widget.backgroundColor = new Color("#1c1c1e");
   widget.setPadding(12, 12, 12, 12);
   const cc = p && p.claude_code;
@@ -324,16 +363,23 @@ function renderSmall(widget, p) {
   bar7.leftAlignImage();
 
   widget.addSpacer(5);
-  const foot = widget.addText(stale
-    ? "更新於 " + hhmm(p.updated_at)
-    : "↻ 5hr " + relTime(cc.five_hour && cc.five_hour.resets_at) +
-      " · 7d " + relTime(cc.seven_day && cc.seven_day.resets_at));
+  let footText, footColor = GRAY;
+  if (stale) {
+    footText = "更新於 " + hhmm(p.updated_at);
+  } else if (etaMin != null) {
+    footText = "🔥 ~" + fmtMinutes(etaMin) + " 後達上限";
+    footColor = new Color("#ff9f0a");
+  } else {
+    footText = "↻ 5hr " + relTime(cc.five_hour && cc.five_hour.resets_at) +
+      " · 7d " + relTime(cc.seven_day && cc.seven_day.resets_at);
+  }
+  const foot = widget.addText(footText);
   foot.font = Font.systemFont(9);
-  foot.textColor = GRAY;
+  foot.textColor = footColor;
 }
 
 // (E) 主畫面 medium：四條進度條（5hr / Weekly / Opus / Sonnet）
-function renderMedium(widget, p) {
+function renderMedium(widget, p, etaMin) {
   widget.backgroundColor = new Color("#1c1c1e");
   widget.setPadding(14, 16, 12, 16);
   const cc = p && p.claude_code;
@@ -371,24 +417,42 @@ function renderMedium(widget, p) {
   }
 
   widget.addSpacer();
-  const foot = widget.addText(stale
+  let footText = stale
     ? "資料過期 · 更新於 " + hhmm(p.updated_at)
     : "↻ 5hr " + relTime(cc.five_hour && cc.five_hour.resets_at) +
       " · 7d " + relTime(cc.seven_day && cc.seven_day.resets_at) +
-      " · 更新 " + hhmm(p.updated_at));
+      " · 更新 " + hhmm(p.updated_at);
+  if (!stale && etaMin != null) footText = "🔥 ~" + fmtMinutes(etaMin) + " 後達上限 · " + footText;
+  const foot = widget.addText(footText);
   foot.font = Font.systemFont(9);
-  foot.textColor = GRAY;
+  foot.textColor = (!stale && etaMin != null) ? new Color("#ff9f0a") : GRAY;
 }
 
 // ---------- 主流程 ----------
 
 async function run() {
-  const payloads = await loadPayloads();
-  const payload = pickPayload(payloads);
   const family = config.widgetFamily || "small"; // App 內預覽預設 small
   const widget = new ListWidget();
   widget.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000); // 建議值，iOS 自行調度
   if (DASHBOARD_URL) widget.url = DASHBOARD_URL; // 點擊跳轉 dashboard
+
+  if (GIST_RAW_URL.indexOf("<user>") !== -1) {
+    renderNoData(widget, "請先在腳本頂部設定 GIST_RAW_URL");
+    if (config.runsInWidget) { Script.setWidget(widget); } else { await widget.presentSmall(); }
+    Script.complete();
+    return;
+  }
+
+  const payloads = await loadPayloads();
+  const payload = pickPayload(payloads);
+
+  // 燒速率只在主畫面 family 計算（多一個請求，鎖屏不需要）
+  let etaMin = null;
+  if ((family === "small" || family === "medium") && payload && !isStale(payload)) {
+    const cc = payload.claude_code || {};
+    etaMin = burnEtaMinutes(await loadHistory(), payload.machine,
+      pctOf(cc.five_hour), cc.five_hour && cc.five_hour.resets_at);
+  }
 
   if (family === "accessoryRectangular") {
     renderRectangular(widget, payload);
@@ -397,9 +461,9 @@ async function run() {
   } else if (family === "accessoryInline") {
     renderInline(widget, payload);
   } else if (family === "small") {
-    renderSmall(widget, payload);
+    renderSmall(widget, payload, etaMin);
   } else if (family === "medium") {
-    renderMedium(widget, payload);
+    renderMedium(widget, payload, etaMin);
   } else {
     renderNoData(widget, "請使用鎖屏、small 或 medium widget");
   }

@@ -294,6 +294,13 @@ async function refresh() {
   const content = document.getElementById("content");
   const empty = document.getElementById("empty");
 
+  if (GIST_RAW_URL.indexOf("<user>") !== -1) {
+    empty.hidden = false;
+    empty.textContent = "請先編輯 index.html，把 GIST_RAW_URL 改成你的 Gist raw 連結。";
+    meta.textContent = "未設定";
+    return;
+  }
+
   const [data, hist] = await Promise.all([
     fetchJson(GIST_RAW_URL),
     fetchJson(HISTORY_RAW_URL),
@@ -320,7 +327,14 @@ async function refresh() {
 }
 
 refresh();
-setInterval(refresh, REFRESH_MS);
+// 分頁在背景時暫停輪詢，切回前景立即刷新
+setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+
+// PWA 離線殼層（GitHub Pages 上才會註冊；本地 file:// 不支援，不影響）
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
 </script>
 </body>
 </html>

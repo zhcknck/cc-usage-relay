@@ -91,29 +91,13 @@ powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1
 
 ### 7. Claude Code 即時 hook（建議）
 
-在 `~/.claude/settings.json` 的 `hooks` 加入（每次 Claude Code 回應結束即時推送）：
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cmd.exe",
-            "args": ["/c", "<repo絕對路徑>\\scripts\\hook_trigger.cmd"],
-            "async": true,
-            "timeout": 30
-          }
-        ]
-      }
-    ]
-  }
-}
+```powershell
+python scripts\install_hook.py
 ```
 
-新開的 Claude Code session 生效。WSL 內的 Claude Code 改用對應的 bash 指令觸發。
+冪等腳本：自動把 Stop hook 合併進 `~/.claude/settings.json`（寫入前備份），
+之後每次 Claude Code 對話結束即時推送用量。新開的 CC session 生效。
+WSL 內的 Claude Code 需另行配置對應的 bash 觸發指令。
 
 ### 8. iPhone Scriptable widget
 
@@ -139,6 +123,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1
 - 鎖屏 widget 為 iOS 系統單色渲染（系統行為）；widget 刷新節奏由 iOS 決定，
   典型 5–15 分鐘，要看即時數據點開 dashboard 或在 Scriptable 內手動執行。
 - 多機同時推送為 last-write-wins，極端情況下某機一輪更新被蓋掉，下一輪自癒。
+- 多機共用同一個 Claude 帳號時，額度是帳號級的——每台都填通知渠道會收到重複警告，
+  建議只在一台填渠道（通知內文會標註發送機器名）。
 
 ## 驗收清單
 

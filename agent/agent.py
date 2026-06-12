@@ -331,6 +331,10 @@ def push_gist(cfg, files):
     url = GIST_API.format(gist_id=cfg["gist_id"])
     body = {"files": {name: {"content": text} for name, text in files.items()}}
     resp = requests.patch(url, headers=gist_headers(cfg), json=body, timeout=HTTP_TIMEOUT)
+    if resp.status_code == 404:
+        raise RuntimeError("Gist 更新失敗 HTTP 404（gist_id 可能填錯，或 token 看不到此 gist）")
+    if resp.status_code in (401, 403):
+        raise RuntimeError("Gist 更新失敗 HTTP %d（github_token 無效或缺 gist 寫入權限）" % resp.status_code)
     if resp.status_code != 200:
         raise RuntimeError("Gist 更新失敗 HTTP %d" % resp.status_code)
 
@@ -427,7 +431,8 @@ def process_notifications(cfg, state, payload):
             # 視窗重置：曾發過警告才發解除通知
             if rec.get("levels"):
                 notify_all(cfg, "✅ Claude Code %s額度已重置" % label,
-                           "上一視窗曾達 %d%% 閾值，現已重置。" % max(rec["levels"]),
+                           "上一視窗曾達 %d%% 閾值，現已重置。（%s）"
+                           % (max(rec["levels"]), cfg["machine_name"]),
                            COLOR_GREEN)
             rec = {"resets_at": resets_at, "levels": []}
 
@@ -436,7 +441,8 @@ def process_notifications(cfg, state, payload):
             top = max(crossed)
             color = COLOR_RED if top >= 90 else COLOR_ORANGE
             title = "⚠️ Claude Code %s額度 %d%%" % (label, round(pct))
-            body = "已超過 %d%% 閾值，重置於 %s" % (int(top), relative_time(resets_at))
+            body = "已超過 %d%% 閾值，重置於 %s（%s）" % (
+                int(top), relative_time(resets_at), cfg["machine_name"])
             if notify_all(cfg, title, body, color):
                 rec["levels"] = sorted(set(rec["levels"]) | set(int(x) for x in crossed))
                 log.info("已發送 %s 閾值 %d%% 通知（resets_at=%s）", window, int(top), resets_at)
@@ -488,7 +494,8 @@ def run_stale(cfg, state, reason):
         state["stale_since"] = now
     if now - float(state["stale_since"]) > 3600 and not state.get("stale_alerted"):
         notify_all(cfg, "⚠️ cc-usage-relay 已逾 1 小時未取得新數據",
-                   "最近原因：%s。widget 將持續顯示過期資料。" % reason, COLOR_ORANGE)
+                   "最近原因：%s。widget 將持續顯示過期資料。（%s）"
+                   % (reason, cfg["machine_name"]), COLOR_ORANGE)
         state["stale_alerted"] = True
     state["last_run_at"] = now
     save_state(state)
