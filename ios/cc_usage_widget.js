@@ -1,8 +1,8 @@
 // Variables used by Scriptable.
 // These must be at the very top of the file. Do not edit.
-// icon-color: green; icon-glyph: tachometer-alt;
+// icon-color: orange; icon-glyph: tachometer-alt;
 /*
-cc-usage-relay — Claude Code 用量 widget（鎖屏為主力）
+cc-usage-relay — Claude Code 用量 widget（橘色版）
 
 安裝步驟：
 1) App Store 安裝 Scriptable（免費）
@@ -10,7 +10,7 @@ cc-usage-relay — Claude Code 用量 widget（鎖屏為主力）
    （https://gist.githubusercontent.com/<user>/<gist_id>/raw/usage.json）
 3) 鎖屏 widget：長按鎖定畫面 → 自訂 → 鎖定畫面 → 點時鐘下方 widget 區
    → 選 Scriptable → 選此 script（矩形或圓形）
-4) 主畫面 widget：長按桌面 → 編輯 → 加入 widget → Scriptable small 或 medium
+4) 主畫面 widget：長按桌面 → 編輯 → 加入 widget → Scriptable small / medium / large
    → 長按該 widget → 編輯 → Script 選此檔
 
 備註：鎖屏 widget 由 iOS 系統單色渲染，僅以透明度區分層次，屬系統行為。
@@ -27,6 +27,22 @@ const MACHINE_NAME = "";
 
 const CACHE_FILE = "cc_usage_cache.json";
 const HISTORY_CACHE_FILE = "cc_usage_history_cache.json";
+
+// ---------- 配色 ----------
+
+const ORANGE = new Color("#ff9c33");   // 主色：5hr
+const TEAL = new Color("#3cc5ae");     // Weekly
+const RED = new Color("#ff453a");      // >= 90%
+const GRAY = new Color("#98989f");
+const TRACK = new Color("#3a3a3c");
+const CARD_BG = new Color("#1c1c1e");
+const PILL_BG = new Color("#2c2c2e");
+
+function tone(pct, stale) {
+  if (stale || pct == null) return GRAY;
+  if (pct >= 90) return RED;
+  return ORANGE;
+}
 
 // ---------- 資料 ----------
 
@@ -130,6 +146,10 @@ function pctOf(block) {
   return Math.max(0, block.pct);
 }
 
+function pctText(pct) {
+  return pct == null ? "--" : String(Math.round(pct));
+}
+
 function barRatio(pct) {
   return Math.min(100, pct == null ? 0 : pct) / 100; // 進度條上限 100
 }
@@ -142,15 +162,6 @@ function extraActive(p) {
     if (typeof ex[k] === "number" && ex[k] > 0) return true;
   }
   return false;
-}
-
-const GRAY = new Color("#98989f");
-
-function tone(pct, stale) {
-  if (stale || pct == null) return GRAY;
-  if (pct >= 90) return new Color("#ff453a");
-  if (pct >= 70) return new Color("#ff9f0a");
-  return new Color("#30d158");
 }
 
 // ---------- 繪圖 ----------
@@ -217,7 +228,7 @@ function drawRing(size, ratio, centerText, opts) {
   return ctx.getImage();
 }
 
-// ---------- 各 family 渲染 ----------
+// ---------- 共用元件 ----------
 
 function renderNoData(widget, msg) {
   const t = widget.addText(msg || "無資料");
@@ -225,8 +236,92 @@ function renderNoData(widget, msg) {
   t.textOpacity = 0.8;
 }
 
-// (A) 鎖屏矩形：標題 + 5hr 粗條 + weekly 細條 + 資訊行
-function renderRectangular(widget, p) {
+// 「● Claude Code」標題列 + 右側 $ / STALE 徽章
+function addHeader(stack, p, stale, label) {
+  const header = stack.addStack();
+  header.centerAlignContent();
+  const dotT = header.addText("●");
+  dotT.font = Font.boldSystemFont(8);
+  dotT.textColor = stale ? GRAY : ORANGE;
+  header.addSpacer(5);
+  const title = header.addText(label);
+  title.font = Font.boldSystemFont(12);
+  title.textColor = Color.white();
+  title.lineLimit = 1;
+  header.addSpacer();
+  if (extraActive(p)) {
+    const dollar = header.addText("$ ");
+    dollar.font = Font.boldSystemFont(11);
+    dollar.textColor = ORANGE;
+  }
+  if (stale) {
+    const badge = header.addText("STALE");
+    badge.font = Font.boldSystemFont(9);
+    badge.textColor = GRAY;
+  }
+  return header;
+}
+
+// 大百分比「62%」：數字大、% 小，底部對齊
+function addBigPct(stack, pct, color, numSize) {
+  const row = stack.addStack();
+  row.bottomAlignContent();
+  const num = row.addText(pctText(pct));
+  num.font = Font.heavySystemFont(numSize);
+  num.textColor = color;
+  row.addSpacer(2);
+  const unit = row.addStack();
+  unit.layoutVertically();
+  const sym = unit.addText("%");
+  sym.font = Font.boldSystemFont(Math.round(numSize * 0.42));
+  sym.textColor = color;
+  unit.addSpacer(Math.round(numSize * 0.12)); // 讓 % 稍微浮起，貼近基線
+  return row;
+}
+
+// 灰字 + 亮色時間的兩段文字，例如「重置 3h30m」
+function addDuoText(stack, dimText, brightText, size, brightColor) {
+  const row = stack.addStack();
+  row.bottomAlignContent();
+  const a = row.addText(dimText);
+  a.font = Font.systemFont(size);
+  a.textColor = GRAY;
+  const b = row.addText(brightText);
+  b.font = Font.boldSystemFont(size);
+  b.textColor = brightColor || Color.white();
+  return row;
+}
+
+// 「標籤 ……… nn%」+ 下方進度條
+function addBarGroup(stack, label, sub, pct, color, barWidth, barHeight, stale) {
+  const lr = stack.addStack();
+  lr.bottomAlignContent();
+  const lt = lr.addText(label);
+  lt.font = Font.systemFont(10);
+  lt.textColor = GRAY;
+  lt.lineLimit = 1;
+  if (sub) {
+    const st = lr.addText(" · " + sub);
+    st.font = Font.systemFont(10);
+    st.textColor = GRAY;
+    st.textOpacity = 0.75;
+    st.lineLimit = 1;
+  }
+  lr.addSpacer();
+  const vt = lr.addText(pctText(pct) + "%");
+  vt.font = Font.boldSystemFont(12);
+  vt.textColor = stale ? GRAY : color;
+  stack.addSpacer(4);
+  const bar = stack.addImage(drawBar(barWidth, barHeight, barRatio(pct),
+    stale ? GRAY : color, TRACK));
+  bar.imageSize = new Size(barWidth, barHeight);
+  bar.leftAlignImage();
+}
+
+// ---------- 鎖屏 family ----------
+
+// (A) 鎖屏矩形：標題 + 5HR/WK 進度條（數字靠右）+ 燒速率/重置
+function renderRectangular(widget, p, etaMin) {
   widget.addAccessoryWidgetBackground = true;
   const cc = p && p.claude_code;
   if (!cc) { renderNoData(widget, "CC 無資料"); return; }
@@ -234,94 +329,82 @@ function renderRectangular(widget, p) {
   const p5 = pctOf(cc.five_hour);
   const p7 = pctOf(cc.seven_day);
 
-  const row1 = widget.addStack();
-  row1.centerAlignContent();
-  let sym = SFSymbol.named("gauge.with.needle");
-  if (!sym || !sym.image) sym = SFSymbol.named("gauge");
-  if (sym && sym.image) {
-    const img = row1.addImage(sym.image);
-    img.imageSize = new Size(16, 16);
-    img.tintColor = Color.white();
-    row1.addSpacer(4);
-  }
-  const title = row1.addText("CC " + (p5 == null ? "--" : Math.round(p5)) + "%");
-  title.font = Font.boldSystemFont(17);
+  const title = widget.addText("Claude Code");
+  title.font = Font.boldSystemFont(13);
+  title.lineLimit = 1;
 
   widget.addSpacer(3);
-  const bar5 = widget.addImage(drawBar(150, 4, barRatio(p5),
-    new Color("#ffffff", 1.0), new Color("#ffffff", 0.3)));
-  bar5.imageSize = new Size(150, 4);
-  bar5.leftAlignImage();
-
+  const mkRow = (label, pct, barH, op) => {
+    const row = widget.addStack();
+    row.centerAlignContent();
+    const lt = row.addText(label);
+    lt.font = Font.systemFont(9);
+    lt.textOpacity = 0.7;
+    row.addSpacer(4);
+    const bar = row.addImage(drawBar(96, barH, barRatio(pct),
+      new Color("#ffffff", op), new Color("#ffffff", 0.28)));
+    bar.imageSize = new Size(96, barH);
+    row.addSpacer(4);
+    const vt = row.addText(pctText(pct));
+    vt.font = Font.boldSystemFont(11);
+  };
+  mkRow("5HR", p5, 4.5, 1.0);
   widget.addSpacer(2);
-  const bar7 = widget.addImage(drawBar(150, 2, barRatio(p7),
-    new Color("#ffffff", 0.85), new Color("#ffffff", 0.25)));
-  bar7.imageSize = new Size(150, 2);
-  bar7.leftAlignImage();
+  mkRow("WK ", p7, 3, 0.85);
 
   widget.addSpacer(3);
   let line3;
   if (stale) {
     line3 = "過期 · " + hhmm(p.updated_at);
+  } else if (etaMin != null) {
+    line3 = "約 " + fmtMinutes(etaMin) + " 後達上限";
   } else {
-    line3 = "W " + (p7 == null ? "--" : Math.round(p7)) + "% · ↻" +
-      relTime(cc.five_hour && cc.five_hour.resets_at);
+    line3 = "↻ " + relTime(cc.five_hour && cc.five_hour.resets_at) + " 重置";
   }
   const t3 = widget.addText(line3);
-  t3.font = Font.systemFont(11);
+  t3.font = Font.systemFont(10);
   t3.textOpacity = 0.7;
 }
 
-// (B) 鎖屏圓形
+// (B) 鎖屏圓形：環 + 中央數字 + 5HR 小字
 function renderCircular(widget, p) {
   widget.addAccessoryWidgetBackground = true;
   const cc = p && p.claude_code;
   const p5 = cc ? pctOf(cc.five_hour) : null;
   const stale = isStale(p);
-  const text = p5 == null ? "--" : String(Math.round(p5));
-  const img = widget.addImage(drawRing(76, barRatio(p5), text, {
+  const img = widget.addImage(drawRing(76, barRatio(p5), pctText(p5), {
     fill: new Color("#ffffff", 1.0),
     track: new Color("#ffffff", 0.25),
     text: Color.white(),
-    sub: stale ? "!" : null,
+    sub: stale ? "!" : "5HR",
   }));
   img.imageSize = new Size(76, 76);
   img.centerAlignImage();
 }
 
 // (C) 鎖屏一行（時鐘上方）
-function renderInline(widget, p) {
+function renderInline(widget, p, etaMin) {
   const cc = p && p.claude_code;
   if (!cc) { widget.addText("CC 無資料"); return; }
   const p5 = pctOf(cc.five_hour);
   const p7 = pctOf(cc.seven_day);
-  const prefix = isStale(p) ? "⚠ " : "";
-  widget.addText(prefix + "CC " + (p5 == null ? "--" : Math.round(p5)) + "% · W " +
-    (p7 == null ? "--" : Math.round(p7)) + "%");
-}
-
-function addHeader(widget, p, stale, label) {
-  const header = widget.addStack();
-  header.centerAlignContent();
-  const title = header.addText(label);
-  title.font = Font.systemFont(12);
-  title.textColor = GRAY;
-  header.addSpacer();
-  if (extraActive(p)) {
-    const dollar = header.addText("$ ");
-    dollar.font = Font.boldSystemFont(11);
-    dollar.textColor = new Color("#ff9f0a");
-  }
+  const stale = isStale(p);
+  let text;
   if (stale) {
-    const badge = header.addText("STALE");
-    badge.font = Font.boldSystemFont(9);
-    badge.textColor = GRAY;
+    text = "⚠ CC " + pctText(p5) + "% · " + hhmm(p.updated_at);
+  } else if (etaMin != null) {
+    text = "● CC " + pctText(p5) + "% · " + fmtMinutes(etaMin) + " 達上限";
+  } else {
+    text = "● CC " + pctText(p5) + "% · W " + pctText(p7) + "%";
   }
+  widget.addText(text);
 }
 
-// (D) 主畫面 small：彩色環形 gauge + Weekly
+// ---------- 主畫面 family（全彩、橘色版）----------
+
+// (D) small：標題 + 大% + 5HR/WK 進度條 + 重置
 function renderSmall(widget, p, etaMin) {
-  widget.backgroundColor = new Color("#1c1c1e");
+  widget.backgroundColor = CARD_BG;
   widget.setPadding(12, 12, 12, 12);
   const cc = p && p.claude_code;
   if (!cc) { renderNoData(widget, "無資料"); return; }
@@ -329,103 +412,171 @@ function renderSmall(widget, p, etaMin) {
   const p5 = pctOf(cc.five_hour);
   const p7 = pctOf(cc.seven_day);
   const mainColor = tone(p5, stale);
-  const weeklyColor = stale ? GRAY : new Color("#6e8cae");
-  const trackColor = new Color("#3a3a3c");
+  const weeklyColor = stale ? GRAY : TEAL;
 
   addHeader(widget, p, stale, "Claude Code");
-  widget.addSpacer(4);
+  widget.addSpacer(2);
+  addBigPct(widget, p5, mainColor, 34);
+  widget.addSpacer();
 
-  const mid = widget.addStack();
-  mid.centerAlignContent();
-  const ring = mid.addImage(drawRing(64, barRatio(p5),
-    p5 == null ? "--" : String(Math.round(p5)), {
-      fill: mainColor, track: trackColor, text: Color.white(),
-      sub: "5hr", subColor: GRAY,
-    }));
-  ring.imageSize = new Size(64, 64);
-  mid.addSpacer();
-  const col = mid.addStack();
-  col.layoutVertically();
-  const wl = col.addText("Weekly");
-  wl.font = Font.systemFont(10);
-  wl.textColor = GRAY;
-  const wv = col.addText((p7 == null ? "--" : Math.round(p7)) + "%");
-  wv.font = Font.boldSystemFont(20);
-  wv.textColor = stale ? GRAY : Color.white();
-  col.addSpacer(4);
-  const wr = col.addText("↻" + relTime(cc.seven_day && cc.seven_day.resets_at));
-  wr.font = Font.systemFont(9);
-  wr.textColor = GRAY;
-
+  const mkRow = (label, pct, color) => {
+    const row = widget.addStack();
+    row.centerAlignContent();
+    const lt = row.addText(label);
+    lt.font = Font.systemFont(9);
+    lt.textColor = GRAY;
+    row.addSpacer(6);
+    const bar = row.addImage(drawBar(104, 5, barRatio(pct), color, TRACK));
+    bar.imageSize = new Size(104, 5);
+  };
+  mkRow("5HR", p5, mainColor);
   widget.addSpacer(6);
-  const bar7 = widget.addImage(drawBar(124, 6, barRatio(p7), weeklyColor, trackColor));
-  bar7.imageSize = new Size(124, 6);
-  bar7.leftAlignImage();
+  mkRow("WK ", p7, weeklyColor);
 
-  widget.addSpacer(5);
-  let footText, footColor = GRAY;
+  widget.addSpacer(8);
   if (stale) {
-    footText = "更新於 " + hhmm(p.updated_at);
+    addDuoText(widget, "更新於 ", hhmm(p.updated_at), 10, GRAY);
   } else if (etaMin != null) {
-    footText = "🔥 ~" + fmtMinutes(etaMin) + " 後達上限";
-    footColor = new Color("#ff9f0a");
+    addDuoText(widget, "約 ", fmtMinutes(etaMin) + " 後達上限", 10, ORANGE);
   } else {
-    footText = "↻ 5hr " + relTime(cc.five_hour && cc.five_hour.resets_at) +
-      " · 7d " + relTime(cc.seven_day && cc.seven_day.resets_at);
+    addDuoText(widget, "重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
   }
-  const foot = widget.addText(footText);
-  foot.font = Font.systemFont(9);
-  foot.textColor = footColor;
 }
 
-// (E) 主畫面 medium：四條進度條（5hr / Weekly / Opus / Sonnet）
+// (E) medium：左側大% + 燒速率；右側 5hr/Weekly 進度條（含重置時間）
 function renderMedium(widget, p, etaMin) {
-  widget.backgroundColor = new Color("#1c1c1e");
+  widget.backgroundColor = CARD_BG;
   widget.setPadding(14, 16, 12, 16);
   const cc = p && p.claude_code;
   if (!cc) { renderNoData(widget, "無資料"); return; }
   const stale = isStale(p);
-  const trackColor = new Color("#3a3a3c");
-  const weeklyColor = stale ? GRAY : new Color("#6e8cae");
+  const p5 = pctOf(cc.five_hour);
+  const p7 = pctOf(cc.seven_day);
+  const mainColor = tone(p5, stale);
+  const weeklyColor = stale ? GRAY : TEAL;
 
-  addHeader(widget, p, stale,
-    "Claude Code" + (p.machine ? " · " + p.machine : ""));
-  widget.addSpacer(6);
+  const outer = widget.addStack();
+  outer.topAlignContent();
 
-  const rows = [
-    ["5hr", pctOf(cc.five_hour), tone(pctOf(cc.five_hour), stale)],
-    ["Weekly", pctOf(cc.seven_day), weeklyColor],
-    ["Opus", pctOf(cc.seven_day_opus), weeklyColor],
-    ["Sonnet", pctOf(cc.seven_day_sonnet), weeklyColor],
-  ];
-  for (const [label, pct, color] of rows) {
-    if (pct == null && label !== "5hr" && label !== "Weekly") continue; // Opus/Sonnet 沒資料就略過
-    const row = widget.addStack();
-    row.centerAlignContent();
-    const lt = row.addText(label);
-    lt.font = Font.systemFont(10);
-    lt.textColor = GRAY;
-    lt.lineLimit = 1;
-    row.addSpacer();
-    const bar = row.addImage(drawBar(200, 6, barRatio(pct), color, trackColor));
-    bar.imageSize = new Size(200, 6);
-    row.addSpacer(8);
-    const vt = row.addText((pct == null ? "--" : Math.round(pct)) + "%");
-    vt.font = Font.boldSystemFont(12);
-    vt.textColor = stale ? GRAY : Color.white();
-    widget.addSpacer(4);
+  const left = outer.addStack();
+  left.layoutVertically();
+  addHeader(left, p, stale, "Claude Code");
+  left.addSpacer(8);
+  addBigPct(left, p5, mainColor, 36);
+  left.addSpacer();
+  if (stale) {
+    addDuoText(left, "更新於 ", hhmm(p.updated_at), 10, GRAY);
+  } else if (etaMin != null) {
+    addDuoText(left, "約 ", fmtMinutes(etaMin) + " 後達上限", 10, ORANGE);
+  } else {
+    addDuoText(left, "重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
+  }
+
+  outer.addSpacer(18);
+
+  const right = outer.addStack();
+  right.layoutVertically();
+  addBarGroup(right, "5hr", "重置 " + relTime(cc.five_hour && cc.five_hour.resets_at),
+    p5, mainColor, 176, 6, stale);
+  right.addSpacer(10);
+  addBarGroup(right, "Weekly", "重置 " + relTime(cc.seven_day && cc.seven_day.resets_at),
+    p7, weeklyColor, 176, 6, stale);
+  // Opus / Sonnet 有資料才顯示（細條）
+  for (const [key, label] of [["seven_day_opus", "Opus"], ["seven_day_sonnet", "Sonnet"]]) {
+    const pct = pctOf(cc[key]);
+    if (pct == null) continue;
+    right.addSpacer(8);
+    addBarGroup(right, label, null, pct, weeklyColor, 176, 4, stale);
+  }
+  right.addSpacer();
+  const footer = right.addStack();
+  footer.addSpacer();
+  const ft = footer.addText((p.machine ? p.machine + " · " : "") + "更新 " + hhmm(p.updated_at));
+  ft.font = Font.systemFont(8);
+  ft.textColor = GRAY;
+  ft.textOpacity = 0.8;
+}
+
+// (F) large：標題 + 大% + 全寬進度條 + 重置藥丸 + 燒速率提示框
+function renderLarge(widget, p, etaMin) {
+  widget.backgroundColor = CARD_BG;
+  widget.setPadding(16, 16, 14, 16);
+  const cc = p && p.claude_code;
+  if (!cc) { renderNoData(widget, "無資料"); return; }
+  const stale = isStale(p);
+  const p5 = pctOf(cc.five_hour);
+  const p7 = pctOf(cc.seven_day);
+  const mainColor = tone(p5, stale);
+  const weeklyColor = stale ? GRAY : TEAL;
+  const W = 304; // 338 - 左右 padding
+
+  const top = widget.addStack();
+  top.bottomAlignContent();
+  const tl = top.addStack();
+  tl.layoutVertically();
+  addHeader(tl, p, stale, "Claude Code");
+  tl.addSpacer(3);
+  const subT = tl.addText(stale ? "資料過期" : "5hr 額度 · 進行中");
+  subT.font = Font.systemFont(10);
+  subT.textColor = GRAY;
+  top.addSpacer();
+  addBigPct(top, p5, mainColor, 32);
+
+  widget.addSpacer(14);
+  addBarGroup(widget, "5hr", null, p5, mainColor, W, 8, stale);
+  widget.addSpacer(12);
+  addBarGroup(widget, "Weekly", null, p7, weeklyColor, W, 8, stale);
+  for (const [key, label] of [["seven_day_opus", "Weekly · Opus"], ["seven_day_sonnet", "Weekly · Sonnet"]]) {
+    const pct = pctOf(cc[key]);
+    if (pct == null) continue;
+    widget.addSpacer(10);
+    addBarGroup(widget, label, null, pct, weeklyColor, W, 6, stale);
+  }
+
+  widget.addSpacer(14);
+  const pills = widget.addStack();
+  pills.centerAlignContent();
+  const mkPill = (dim, bright) => {
+    const pill = pills.addStack();
+    pill.backgroundColor = PILL_BG;
+    pill.cornerRadius = 9;
+    pill.setPadding(5, 9, 5, 9);
+    pill.centerAlignContent();
+    const a = pill.addText(dim);
+    a.font = Font.systemFont(10);
+    a.textColor = GRAY;
+    const b = pill.addText(bright);
+    b.font = Font.boldSystemFont(10);
+    b.textColor = Color.white();
+  };
+  mkPill("5hr 重置 ", relTime(cc.five_hour && cc.five_hour.resets_at));
+  pills.addSpacer(8);
+  mkPill("7日 重置 ", relTime(cc.seven_day && cc.seven_day.resets_at));
+  pills.addSpacer();
+
+  if (!stale && etaMin != null) {
+    widget.addSpacer(12);
+    const box = widget.addStack();
+    box.backgroundColor = new Color("#ff9c33", 0.14);
+    box.cornerRadius = 10;
+    box.setPadding(8, 10, 8, 10);
+    box.centerAlignContent();
+    const dotT = box.addText("● ");
+    dotT.font = Font.boldSystemFont(9);
+    dotT.textColor = ORANGE;
+    const bt = box.addText("依目前速度，約 " + fmtMinutes(etaMin) + " 後達 5hr 上限");
+    bt.font = Font.boldSystemFont(11);
+    bt.textColor = ORANGE;
+    bt.lineLimit = 1;
   }
 
   widget.addSpacer();
-  let footText = stale
-    ? "資料過期 · 更新於 " + hhmm(p.updated_at)
-    : "↻ 5hr " + relTime(cc.five_hour && cc.five_hour.resets_at) +
-      " · 7d " + relTime(cc.seven_day && cc.seven_day.resets_at) +
-      " · 更新 " + hhmm(p.updated_at);
-  if (!stale && etaMin != null) footText = "🔥 ~" + fmtMinutes(etaMin) + " 後達上限 · " + footText;
-  const foot = widget.addText(footText);
-  foot.font = Font.systemFont(9);
-  foot.textColor = (!stale && etaMin != null) ? new Color("#ff9f0a") : GRAY;
+  const footer = widget.addStack();
+  footer.addSpacer();
+  const ft = footer.addText((p.machine ? p.machine + " · " : "") + "更新 " + hhmm(p.updated_at));
+  ft.font = Font.systemFont(9);
+  ft.textColor = GRAY;
+  ft.textOpacity = 0.8;
 }
 
 // ---------- 主流程 ----------
@@ -446,26 +597,28 @@ async function run() {
   const payloads = await loadPayloads();
   const payload = pickPayload(payloads);
 
-  // 燒速率只在主畫面 family 計算（多一個請求，鎖屏不需要）
+  // 燒速率（圓形鎖屏放不下，不用多抓一次 history）
   let etaMin = null;
-  if ((family === "small" || family === "medium") && payload && !isStale(payload)) {
+  if (family !== "accessoryCircular" && payload && !isStale(payload)) {
     const cc = payload.claude_code || {};
     etaMin = burnEtaMinutes(await loadHistory(), payload.machine,
       pctOf(cc.five_hour), cc.five_hour && cc.five_hour.resets_at);
   }
 
   if (family === "accessoryRectangular") {
-    renderRectangular(widget, payload);
+    renderRectangular(widget, payload, etaMin);
   } else if (family === "accessoryCircular") {
     renderCircular(widget, payload);
   } else if (family === "accessoryInline") {
-    renderInline(widget, payload);
+    renderInline(widget, payload, etaMin);
   } else if (family === "small") {
     renderSmall(widget, payload, etaMin);
   } else if (family === "medium") {
     renderMedium(widget, payload, etaMin);
+  } else if (family === "large" || family === "extraLarge") {
+    renderLarge(widget, payload, etaMin);
   } else {
-    renderNoData(widget, "請使用鎖屏、small 或 medium widget");
+    renderNoData(widget, "請使用鎖屏、small / medium / large widget");
   }
 
   if (config.runsInWidget) {
@@ -478,6 +631,8 @@ async function run() {
     await widget.presentAccessoryInline();
   } else if (family === "medium") {
     await widget.presentMedium();
+  } else if (family === "large" || family === "extraLarge") {
+    await widget.presentLarge();
   } else {
     await widget.presentSmall();
   }
