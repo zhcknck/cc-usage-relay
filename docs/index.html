@@ -145,6 +145,11 @@ function toneVar(pct) {
   return "var(--green)";
 }
 
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 function relTime(iso) {
   if (!iso) return "--";
   const mins = Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 60000));
@@ -206,9 +211,10 @@ function chartSvg(points) {
     </svg>`;
 }
 
-// ---- 燒速率：以最近 60 分鐘的 5hr% 做線性擬合 ----
+// ---- 燒速率：以最近 60 分鐘的 5hr% 做線性擬合（只取本視窗的點，避免跨重置斷崖失真）----
 function burnLine(points, currentP5, resetsAt) {
-  const cutoff = Date.now() - 60 * 60 * 1000;
+  const winStart = resetsAt ? new Date(resetsAt).getTime() - 5 * 3600 * 1000 : -Infinity;
+  const cutoff = Math.max(Date.now() - 60 * 60 * 1000, winStart);
   const pts = points.filter(p => p.t >= cutoff && typeof p.h5 === "number");
   if (pts.length < 3 || currentP5 == null) return "";
   const n = pts.length;
@@ -228,10 +234,37 @@ function burnLine(points, currentP5, resetsAt) {
   return `<div class="burn hot">🔥 照此速度約 ${fmt(etaMin)} 後達 5hr 上限</div>`;
 }
 
+// ---- 週額度耗盡預測：近 24h 的 7日% 線性擬合（同樣只取本視窗的點）----
+function weeklyForecast(points, currentP7, resetsAt) {
+  if (currentP7 == null || !resetsAt) return "";
+  const end = new Date(resetsAt).getTime();
+  if (!isFinite(end)) return "";
+  const cutoff = Math.max(Date.now() - 24 * 3600 * 1000, end - 7 * 24 * 3600 * 1000);
+  const pts = points.filter(p => p.t >= cutoff && typeof p.d7 === "number");
+  if (pts.length < 5) return "";
+  const n = pts.length;
+  const mx = pts.reduce((s, p) => s + p.t, 0) / n;
+  const my = pts.reduce((s, p) => s + p.d7, 0) / n;
+  let num = 0, den = 0;
+  for (const p of pts) { num += (p.t - mx) * (p.d7 - my); den += (p.t - mx) ** 2; }
+  if (!den) return "";
+  const slopePerDay = (num / den) * 86400000; // %/天
+  if (slopePerDay < 1) return ""; // 每天爬不到 1% 不值得預測
+  const etaDays = (100 - currentP7) / slopePerDay;
+  const resetDays = (end - Date.now()) / 86400000;
+  if (etaDays >= resetDays) return "";
+  const fmtD = d => d < 1 ? Math.round(d * 24) + "h" : (Math.round(d * 10) / 10) + "d";
+  return `<div class="burn hot">📅 照此速度，週額度約 ${fmtD(etaDays)} 後耗盡（距重置還有 ${fmtD(resetDays)}）</div>`;
+}
+
 function extraLine(p) {
   const ex = p.extra_usage;
-  if (!ex || typeof ex !== "object" || !Object.keys(ex).length) return "";
-  const parts = Object.entries(ex).map(([k, v]) => `${k}: ${v}`);
+  if (!ex || typeof ex !== "object") return "";
+  // is_enabled/enabled 為 false 純屬噪音，不顯示
+  const parts = Object.entries(ex)
+    .filter(([k, v]) => !((k === "is_enabled" || k === "enabled") && v === false))
+    .map(([k, v]) => `${esc(k)}: ${esc(v)}`);
+  if (!parts.length) return "";
   return `<div class="extra">Extra usage — ${parts.join(" · ")}</div>`;
 }
 
@@ -264,6 +297,7 @@ function renderPayload(p, history) {
       <div class="resets">5hr 重置於 ${relTime(cc.five_hour && cc.five_hour.resets_at)} ·
         7日 重置於 ${relTime(cc.seven_day && cc.seven_day.resets_at)}</div>
       ${stale ? "" : burnLine(points, p5, cc.five_hour && cc.five_hour.resets_at)}
+      ${stale ? "" : weeklyForecast(points, p7, cc.seven_day && cc.seven_day.resets_at)}
       ${extraLine(p)}`;
   if (points.length >= 2) {
     card += `
@@ -276,7 +310,8 @@ function renderPayload(p, history) {
 
   return `
     <section class="machine">
-      <h2><span>${p.machine || "未知機器"}</span>${stale ? '<span class="mstale">過期 ' + hhmm(p.updated_at) + "</span>" : ""}</h2>
+      <h2><span>${esc(p.machine || "未知機器")}</span>${stale ? '<span class="mstale">過期 ' + hhmm(p.updated_at) +
+        (p.stale_reason ? " · " + esc(p.stale_reason) : "") + "</span>" : ""}</h2>
       ${card}
     </section>`;
 }

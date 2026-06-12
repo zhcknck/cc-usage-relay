@@ -20,7 +20,7 @@ cc-usage-relay — Claude Code 用量 widget（橘色版）
 const GIST_RAW_URL = "https://gist.githubusercontent.com/zhcknck/9585fb88cf03a9982de3e2b9b2fc0299/raw/usage.json";
 const STALE_MINUTES = 20;
 // 點 widget 開啟的網址（GitHub Pages dashboard），留空 = 開 Scriptable
-const DASHBOARD_URL = "";
+const DASHBOARD_URL = "https://zhcknck.github.io/cc-usage-relay/";
 // 多機時指定要顯示哪台（對應 config 的 machine_name），留空 = 取最新一台
 const MACHINE_NAME = "";
 // ==============================
@@ -77,9 +77,11 @@ async function loadHistory() {
 }
 
 // 燒速率：最近 60 分鐘 5hr% 線性擬合 -> 預估幾分鐘後達 100%（不會達則回 null）
+// 只取本視窗內的點，避免跨重置斷崖把斜率拉成負值
 function burnEtaMinutes(history, machine, currentP5, resetsAt) {
   if (currentP5 == null) return null;
-  const cutoff = Date.now() - 60 * 60 * 1000;
+  const winStart = resetsAt ? new Date(resetsAt).getTime() - 5 * 3600 * 1000 : -Infinity;
+  const cutoff = Math.max(Date.now() - 60 * 60 * 1000, winStart);
   const pts = history
     .filter(e => e && e.m === machine && typeof e.h5 === "number")
     .map(e => ({ t: new Date(e.t).getTime(), v: e.h5 }))
@@ -148,6 +150,13 @@ function pctOf(block) {
 
 function pctText(pct) {
   return pct == null ? "--" : String(Math.round(pct));
+}
+
+// stale 原因（agent 寫進 payload 的 stale_reason）-> 簡短顯示
+function staleReason(p) {
+  const r = p && p.stale_reason;
+  if (!r) return "";
+  return String(r).indexOf("token") !== -1 ? "token過期" : "連線失敗";
 }
 
 function barRatio(pct) {
@@ -355,7 +364,8 @@ function renderRectangular(widget, p, etaMin) {
   widget.addSpacer(3);
   let line3;
   if (stale) {
-    line3 = "過期 · " + hhmm(p.updated_at);
+    const sr = staleReason(p);
+    line3 = "過期 · " + hhmm(p.updated_at) + (sr ? " · " + sr : "");
   } else if (etaMin != null) {
     line3 = "約 " + fmtMinutes(etaMin) + " 後達上限";
   } else {
@@ -435,7 +445,8 @@ function renderSmall(widget, p, etaMin) {
 
   widget.addSpacer(8);
   if (stale) {
-    addDuoText(widget, "更新於 ", hhmm(p.updated_at), 10, GRAY);
+    const sr = staleReason(p);
+    addDuoText(widget, "更新於 ", hhmm(p.updated_at) + (sr ? " · " + sr : ""), 10, GRAY);
   } else if (etaMin != null) {
     addDuoText(widget, "約 ", fmtMinutes(etaMin) + " 後達上限", 10, ORANGE);
   } else {
@@ -465,7 +476,8 @@ function renderMedium(widget, p, etaMin) {
   addBigPct(left, p5, mainColor, 36);
   left.addSpacer();
   if (stale) {
-    addDuoText(left, "更新於 ", hhmm(p.updated_at), 10, GRAY);
+    const sr = staleReason(p);
+    addDuoText(left, "更新於 ", hhmm(p.updated_at) + (sr ? " · " + sr : ""), 10, GRAY);
   } else if (etaMin != null) {
     addDuoText(left, "約 ", fmtMinutes(etaMin) + " 後達上限", 10, ORANGE);
   } else {

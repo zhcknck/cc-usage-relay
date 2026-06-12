@@ -2,6 +2,11 @@
 config.json
 state.json
 *.log
+agent.lock
+*.tmp
+
+# 多帳號 credentials 副本（機密）
+accounts/
 
 # Python
 __pycache__/
