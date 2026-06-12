@@ -329,7 +329,7 @@ function addBarGroup(stack, label, sub, pct, color, barWidth, barHeight, stale) 
 
 // ---------- 鎖屏 family ----------
 
-// (A) 鎖屏矩形：標題 + 5HR/WK 進度條（數字靠右）+ 燒速率/重置
+// (A) 鎖屏矩形：大字 5hr%＋重置倒數恆顯示 + 雙進度條 + 週額度/燒速率
 function renderRectangular(widget, p, etaMin) {
   widget.addAccessoryWidgetBackground = true;
   const cc = p && p.claude_code;
@@ -338,55 +338,57 @@ function renderRectangular(widget, p, etaMin) {
   const p5 = pctOf(cc.five_hour);
   const p7 = pctOf(cc.seven_day);
 
-  const title = widget.addText("Claude Code");
-  title.font = Font.boldSystemFont(13);
-  title.lineLimit = 1;
+  // 第一行：大字 5hr% + 右側重置倒數（不會被其他資訊擠掉）
+  const row1 = widget.addStack();
+  row1.bottomAlignContent();
+  const big = row1.addText("CC " + pctText(p5) + "%");
+  big.font = Font.heavySystemFont(18);
+  big.lineLimit = 1;
+  row1.addSpacer();
+  const rst = row1.addText("↻" + relTime(cc.five_hour && cc.five_hour.resets_at));
+  rst.font = Font.boldSystemFont(12);
+  rst.textOpacity = 0.85;
 
   widget.addSpacer(3);
-  const mkRow = (label, pct, barH, op) => {
-    const row = widget.addStack();
-    row.centerAlignContent();
-    const lt = row.addText(label);
-    lt.font = Font.systemFont(9);
-    lt.textOpacity = 0.7;
-    row.addSpacer(4);
-    const bar = row.addImage(drawBar(96, barH, barRatio(pct),
-      new Color("#ffffff", op), new Color("#ffffff", 0.28)));
-    bar.imageSize = new Size(96, barH);
-    row.addSpacer(4);
-    const vt = row.addText(pctText(pct));
-    vt.font = Font.boldSystemFont(11);
-  };
-  mkRow("5HR", p5, 4.5, 1.0);
-  widget.addSpacer(2);
-  mkRow("WK ", p7, 3, 0.85);
+  const bar5 = widget.addImage(drawBar(150, 5, barRatio(p5),
+    new Color("#ffffff", 1.0), new Color("#ffffff", 0.28)));
+  bar5.imageSize = new Size(150, 5);
+  bar5.leftAlignImage();
 
   widget.addSpacer(3);
-  let line3;
+  const bar7 = widget.addImage(drawBar(150, 3, barRatio(p7),
+    new Color("#ffffff", 0.8), new Color("#ffffff", 0.22)));
+  bar7.imageSize = new Size(150, 3);
+  bar7.leftAlignImage();
+
+  widget.addSpacer(3);
+  let line4;
   if (stale) {
     const sr = staleReason(p);
-    line3 = "過期 · " + hhmm(p.updated_at) + (sr ? " · " + sr : "");
+    line4 = "過期 " + hhmm(p.updated_at) + (sr ? " · " + sr : "");
   } else if (etaMin != null) {
-    line3 = "約 " + fmtMinutes(etaMin) + " 後達上限";
+    line4 = "W " + pctText(p7) + "% · 約" + fmtMinutes(etaMin) + "達上限";
   } else {
-    line3 = "↻ " + relTime(cc.five_hour && cc.five_hour.resets_at) + " 重置";
+    line4 = "W " + pctText(p7) + "% · 7日 ↻" + relTime(cc.seven_day && cc.seven_day.resets_at);
   }
-  const t3 = widget.addText(line3);
-  t3.font = Font.systemFont(10);
-  t3.textOpacity = 0.7;
+  const t4 = widget.addText(line4);
+  t4.font = Font.systemFont(11);
+  t4.textOpacity = 0.75;
+  t4.lineLimit = 1;
 }
 
-// (B) 鎖屏圓形：環 + 中央數字 + 5HR 小字
+// (B) 鎖屏圓形：環 + 中央數字 + 重置倒數小字
 function renderCircular(widget, p) {
   widget.addAccessoryWidgetBackground = true;
   const cc = p && p.claude_code;
   const p5 = cc ? pctOf(cc.five_hour) : null;
   const stale = isStale(p);
+  const reset = cc ? relTime(cc.five_hour && cc.five_hour.resets_at) : "--";
   const img = widget.addImage(drawRing(76, barRatio(p5), pctText(p5), {
     fill: new Color("#ffffff", 1.0),
     track: new Color("#ffffff", 0.25),
     text: Color.white(),
-    sub: stale ? "!" : "5HR",
+    sub: stale ? "!" : "↻" + reset,
   }));
   img.imageSize = new Size(76, 76);
   img.centerAlignImage();
@@ -405,7 +407,7 @@ function renderInline(widget, p, etaMin) {
   } else if (etaMin != null) {
     text = "● CC " + pctText(p5) + "% · " + fmtMinutes(etaMin) + " 達上限";
   } else {
-    text = "● CC " + pctText(p5) + "% · W " + pctText(p7) + "%";
+    text = "● CC " + pctText(p5) + "% · ↻" + relTime(cc.five_hour && cc.five_hour.resets_at);
   }
   widget.addText(text);
 }
