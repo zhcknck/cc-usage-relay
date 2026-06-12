@@ -79,7 +79,8 @@ async function loadHistory() {
 // 燒速率：最近 60 分鐘 5hr% 線性擬合 -> 預估幾分鐘後達 100%（不會達則回 null）
 // 只取本視窗內的點，避免跨重置斷崖把斜率拉成負值
 function burnEtaMinutes(history, machine, currentP5, resetsAt) {
-  if (currentP5 == null) return null;
+  if (currentP5 == null || currentP5 >= 99.5) return null; // 已達上限就顯示重置倒數
+
   const winStart = resetsAt ? new Date(resetsAt).getTime() - 5 * 3600 * 1000 : -Infinity;
   const cutoff = Math.max(Date.now() - 60 * 60 * 1000, winStart);
   const pts = history
@@ -264,10 +265,15 @@ function addHeader(stack, p, stale, label) {
     dollar.textColor = ORANGE;
   }
   if (stale) {
-    const badge = header.addText("STALE");
+    const badge = header.addText("STALE ");
     badge.font = Font.boldSystemFont(9);
     badge.textColor = GRAY;
   }
+  // 資料時間戳：iOS 重跑 widget 的節奏不可控，至少讓人知道數字是幾點的
+  const ts = header.addText(hhmm(p && p.updated_at));
+  ts.font = Font.systemFont(8);
+  ts.textColor = GRAY;
+  ts.textOpacity = 0.8;
   return header;
 }
 

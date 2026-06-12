@@ -187,17 +187,31 @@ function barRow(label, pct, color) {
 }
 
 // ---- 走勢圖（inline SVG，無框架）----
+function chartStart(points) {
+  // x 軸起點：資料夠久取 24h，不夠就從第一筆開始（避免線全擠在右邊）
+  const t0 = Date.now() - CHART_HOURS * 3600 * 1000;
+  return points.length ? Math.max(t0, points[0].t) : t0;
+}
+
 function chartSvg(points) {
   // points: [{t: ms, h5, d7}] 已按時間排序
   const W = 320, H = 84, PAD = 4;
   const now = Date.now();
-  const t0 = now - CHART_HOURS * 3600 * 1000;
-  const x = (t) => PAD + ((t - t0) / (now - t0)) * (W - PAD * 2);
+  const t0 = chartStart(points);
+  const span = Math.max(now - t0, 60000);
+  const x = (t) => PAD + ((t - t0) / span) * (W - PAD * 2);
   const y = (pct) => H - PAD - (Math.min(100, Math.max(0, pct)) / 100) * (H - PAD * 2);
   const line = (key) => {
-    const pts = points.filter(p => typeof p[key] === "number");
+    const pts = points.filter(p => typeof p[key] === "number" && p.t >= t0);
     if (pts.length < 2) return "";
-    return pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + " " + y(p[key]).toFixed(1)).join(" ");
+    // 重置斷崖（驟降 >10%）或資料空窗（>20 分鐘）→ 斷線重新起筆，不硬連
+    let d = "", prev = null;
+    for (const p of pts) {
+      const brk = !prev || p.t - prev.t > 20 * 60 * 1000 || prev[key] - p[key] > 10;
+      d += (brk ? "M" : "L") + x(p.t).toFixed(1) + " " + y(p[key]).toFixed(1) + " ";
+      prev = p;
+    }
+    return d.trim();
   };
   const grid = (pct, dash) =>
     `<line x1="${PAD}" y1="${y(pct)}" x2="${W - PAD}" y2="${y(pct)}"
@@ -217,6 +231,7 @@ function burnLine(points, currentP5, resetsAt) {
   const cutoff = Math.max(Date.now() - 60 * 60 * 1000, winStart);
   const pts = points.filter(p => p.t >= cutoff && typeof p.h5 === "number");
   if (pts.length < 3 || currentP5 == null) return "";
+  if (currentP5 >= 99.5) return `<div class="burn hot">🔥 已達 5hr 上限，等待重置</div>`;
   const n = pts.length;
   const mx = pts.reduce((s, p) => s + p.t, 0) / n;
   const my = pts.reduce((s, p) => s + p.h5, 0) / n;
@@ -300,9 +315,10 @@ function renderPayload(p, history) {
       ${stale ? "" : weeklyForecast(points, p7, cc.seven_day && cc.seven_day.resets_at)}
       ${extraLine(p)}`;
   if (points.length >= 2) {
+    const chartHrs = Math.max(1, Math.round((Date.now() - chartStart(points)) / 3600000));
     card += `
       <div class="chart-wrap">
-        <div class="label"><span class="k5">5hr</span><span class="k7">Weekly</span><span>近 ${CHART_HOURS}h</span></div>
+        <div class="label"><span class="k5">5hr</span><span class="k7">Weekly</span><span>近 ${chartHrs}h</span></div>
         ${chartSvg(points)}
       </div>`;
   }
