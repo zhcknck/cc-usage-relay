@@ -444,11 +444,15 @@ function renderSmall(widget, p, etaMin) {
     lt.font = Font.systemFont(9);
     lt.textColor = GRAY;
     row.addSpacer(6);
-    const bar = row.addImage(drawBar(104, 5, barRatio(pct), color, TRACK));
-    bar.imageSize = new Size(104, 5);
+    const bar = row.addImage(drawBar(64, 5, barRatio(pct), color, TRACK));
+    bar.imageSize = new Size(64, 5);
+    row.addSpacer();
+    const vt = row.addText(pctText(pct) + "%");
+    vt.font = Font.boldSystemFont(11);
+    vt.textColor = stale ? GRAY : color;
   };
   mkRow("5HR", p5, mainColor);
-  widget.addSpacer(6);
+  widget.addSpacer(7);
   mkRow("WK ", p7, weeklyColor);
 
   widget.addSpacer(8);
