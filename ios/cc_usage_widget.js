@@ -10,36 +10,52 @@ cc-usage-relay — Claude Code 用量 widget（鎖屏為主力）
    （https://gist.githubusercontent.com/<user>/<gist_id>/raw/usage.json）
 3) 鎖屏 widget：長按鎖定畫面 → 自訂 → 鎖定畫面 → 點時鐘下方 widget 區
    → 選 Scriptable → 選此 script（矩形或圓形）
-4) 主畫面 widget：長按桌面 → 編輯 → 加入 widget → Scriptable small
+4) 主畫面 widget：長按桌面 → 編輯 → 加入 widget → Scriptable small 或 medium
    → 長按該 widget → 編輯 → Script 選此檔
 
 備註：鎖屏 widget 由 iOS 系統單色渲染，僅以透明度區分層次，屬系統行為。
 */
 
-// ===== 使用者唯一需要改的地方 =====
+// ===== 使用者需要改的地方 =====
 const GIST_RAW_URL = "https://gist.githubusercontent.com/<user>/<id>/raw/usage.json";
 const STALE_MINUTES = 20;
-// =================================
+// 點 widget 開啟的網址（GitHub Pages dashboard），留空 = 開 Scriptable
+const DASHBOARD_URL = "";
+// 多機時指定要顯示哪台（對應 config 的 machine_name），留空 = 取最新一台
+const MACHINE_NAME = "";
+// ==============================
 
 const CACHE_FILE = "cc_usage_cache.json";
 
 // ---------- 資料 ----------
 
-async function loadPayload() {
+async function loadPayloads() {
   const fm = FileManager.local();
   const cachePath = fm.joinPath(fm.libraryDirectory(), CACHE_FILE);
+  let data = null;
   try {
     const req = new Request(GIST_RAW_URL + "?t=" + Date.now()); // 破 CDN 快取
     req.timeoutInterval = 10;
-    const data = await req.loadJSON();
+    data = await req.loadJSON();
     fm.writeString(cachePath, JSON.stringify(data));
-    return data;
   } catch (e) {
     if (fm.fileExists(cachePath)) {
-      try { return JSON.parse(fm.readString(cachePath)); } catch (e2) {}
+      try { data = JSON.parse(fm.readString(cachePath)); } catch (e2) {}
     }
-    return null;
   }
+  if (!data) return [];
+  if (Array.isArray(data)) return data.filter(p => p && p.claude_code !== undefined);
+  return data.claude_code !== undefined ? [data] : [];
+}
+
+function pickPayload(payloads) {
+  if (!payloads.length) return null;
+  if (MACHINE_NAME) {
+    const hit = payloads.find(p => p.machine === MACHINE_NAME);
+    if (hit) return hit;
+  }
+  return payloads.slice().sort((a, b) =>
+    new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0];
 }
 
 function isStale(p) {
@@ -79,7 +95,32 @@ function barRatio(pct) {
   return Math.min(100, pct == null ? 0 : pct) / 100; // 進度條上限 100
 }
 
+function extraActive(p) {
+  const ex = p && p.extra_usage;
+  if (!ex || typeof ex !== "object") return false;
+  if (ex.is_enabled === true || ex.enabled === true) return true;
+  for (const k of ["used_credits", "used", "utilization", "amount"]) {
+    if (typeof ex[k] === "number" && ex[k] > 0) return true;
+  }
+  return false;
+}
+
+const GRAY = new Color("#98989f");
+
+function tone(pct, stale) {
+  if (stale || pct == null) return GRAY;
+  if (pct >= 90) return new Color("#ff453a");
+  if (pct >= 70) return new Color("#ff9f0a");
+  return new Color("#30d158");
+}
+
 // ---------- 繪圖 ----------
+
+function roundedRect(x, y, w, h, r) {
+  const p = new Path();
+  p.addRoundedRect(new Rect(x, y, w, h), r, r);
+  return p;
+}
 
 function drawBar(width, height, ratio, fgColor, bgColor) {
   const ctx = new DrawContext();
@@ -99,14 +140,9 @@ function drawBar(width, height, ratio, fgColor, bgColor) {
   return ctx.getImage();
 }
 
-function roundedRect(x, y, w, h, r) {
-  const p = new Path();
-  p.addRoundedRect(new Rect(x, y, w, h), r, r);
-  return p;
-}
-
 // 圓環 gauge：以小圓點沿弧線排列近似（DrawContext 無原生弧線 API）
-function drawRing(size, ratio, centerText, stale) {
+// opts: { fill, track, text, sub }（sub 為中央數字下的小字，可省略）
+function drawRing(size, ratio, centerText, opts) {
   const ctx = new DrawContext();
   ctx.size = new Size(size, size);
   ctx.opaque = false;
@@ -123,19 +159,18 @@ function drawRing(size, ratio, centerText, stale) {
     ctx.fillEllipse(new Rect(x, y, lineW, lineW));
   };
 
-  const bg = new Color("#ffffff", 0.25);
-  for (let a = 0; a < 360; a += 3) dot(a, bg);
+  for (let a = 0; a < 360; a += 3) dot(a, opts.track);
   const sweep = 360 * Math.min(1, ratio);
-  const fg = new Color("#ffffff", 1.0);
-  for (let a = 0; a <= sweep; a += 2) dot(a, fg); // 順時針
+  for (let a = 0; a <= sweep; a += 2) dot(a, opts.fill); // 順時針
 
   ctx.setTextAlignedCenter();
-  ctx.setTextColor(Color.white());
-  if (stale) {
-    ctx.setFont(Font.boldSystemFont(size * 0.30));
-    ctx.drawTextInRect(centerText, new Rect(0, size * 0.20, size, size * 0.40));
-    ctx.setFont(Font.boldSystemFont(size * 0.18));
-    ctx.drawTextInRect("!", new Rect(0, size * 0.56, size, size * 0.30));
+  ctx.setTextColor(opts.text);
+  if (opts.sub) {
+    ctx.setFont(Font.boldSystemFont(size * 0.28));
+    ctx.drawTextInRect(centerText, new Rect(0, size * 0.24, size, size * 0.36));
+    ctx.setFont(Font.systemFont(size * 0.13));
+    ctx.setTextColor(opts.subColor || opts.text);
+    ctx.drawTextInRect(opts.sub, new Rect(0, size * 0.58, size, size * 0.2));
   } else {
     ctx.setFont(Font.boldSystemFont(size * 0.32));
     ctx.drawTextInRect(centerText, new Rect(0, size * 0.30, size, size * 0.40));
@@ -151,7 +186,7 @@ function renderNoData(widget, msg) {
   t.textOpacity = 0.8;
 }
 
-// (A) 鎖屏矩形
+// (A) 鎖屏矩形：標題 + 5hr 粗條 + weekly 細條 + 資訊行
 function renderRectangular(widget, p) {
   widget.addAccessoryWidgetBackground = true;
   const cc = p && p.claude_code;
@@ -174,10 +209,16 @@ function renderRectangular(widget, p) {
   title.font = Font.boldSystemFont(17);
 
   widget.addSpacer(3);
-  const bar = widget.addImage(drawBar(150, 4, barRatio(p5),
+  const bar5 = widget.addImage(drawBar(150, 4, barRatio(p5),
     new Color("#ffffff", 1.0), new Color("#ffffff", 0.3)));
-  bar.imageSize = new Size(150, 4);
-  bar.leftAlignImage();
+  bar5.imageSize = new Size(150, 4);
+  bar5.leftAlignImage();
+
+  widget.addSpacer(2);
+  const bar7 = widget.addImage(drawBar(150, 2, barRatio(p7),
+    new Color("#ffffff", 0.85), new Color("#ffffff", 0.25)));
+  bar7.imageSize = new Size(150, 2);
+  bar7.leftAlignImage();
 
   widget.addSpacer(3);
   let line3;
@@ -199,7 +240,12 @@ function renderCircular(widget, p) {
   const p5 = cc ? pctOf(cc.five_hour) : null;
   const stale = isStale(p);
   const text = p5 == null ? "--" : String(Math.round(p5));
-  const img = widget.addImage(drawRing(76, barRatio(p5), text, stale));
+  const img = widget.addImage(drawRing(76, barRatio(p5), text, {
+    fill: new Color("#ffffff", 1.0),
+    track: new Color("#ffffff", 0.25),
+    text: Color.white(),
+    sub: stale ? "!" : null,
+  }));
   img.imageSize = new Size(76, 76);
   img.centerAlignImage();
 }
@@ -215,7 +261,26 @@ function renderInline(widget, p) {
     (p7 == null ? "--" : Math.round(p7)) + "%");
 }
 
-// (D) 主畫面 small（全彩）
+function addHeader(widget, p, stale, label) {
+  const header = widget.addStack();
+  header.centerAlignContent();
+  const title = header.addText(label);
+  title.font = Font.systemFont(12);
+  title.textColor = GRAY;
+  header.addSpacer();
+  if (extraActive(p)) {
+    const dollar = header.addText("$ ");
+    dollar.font = Font.boldSystemFont(11);
+    dollar.textColor = new Color("#ff9f0a");
+  }
+  if (stale) {
+    const badge = header.addText("STALE");
+    badge.font = Font.boldSystemFont(9);
+    badge.textColor = GRAY;
+  }
+}
+
+// (D) 主畫面 small：彩色環形 gauge + Weekly
 function renderSmall(widget, p) {
   widget.backgroundColor = new Color("#1c1c1e");
   widget.setPadding(12, 12, 12, 12);
@@ -224,65 +289,106 @@ function renderSmall(widget, p) {
   const stale = isStale(p);
   const p5 = pctOf(cc.five_hour);
   const p7 = pctOf(cc.seven_day);
-
-  const gray = new Color("#98989f");
-  const tone = (pct) => {
-    if (stale || pct == null) return gray;
-    if (pct >= 90) return new Color("#ff453a");
-    if (pct >= 70) return new Color("#ff9f0a");
-    return new Color("#30d158");
-  };
-  const mainColor = tone(p5);
-  const weeklyColor = stale ? gray : new Color("#6e8cae");
+  const mainColor = tone(p5, stale);
+  const weeklyColor = stale ? GRAY : new Color("#6e8cae");
   const trackColor = new Color("#3a3a3c");
 
-  const header = widget.addStack();
-  header.centerAlignContent();
-  const title = header.addText("Claude Code");
-  title.font = Font.systemFont(13);
-  title.textColor = gray;
-  if (stale) {
-    header.addSpacer();
-    const badge = header.addText("STALE");
-    badge.font = Font.boldSystemFont(9);
-    badge.textColor = gray;
-  }
-
+  addHeader(widget, p, stale, "Claude Code");
   widget.addSpacer(4);
-  const big = widget.addText((p5 == null ? "--" : Math.round(p5)) + "%");
-  big.font = Font.boldSystemFont(34);
-  big.textColor = mainColor;
 
-  widget.addSpacer(4);
-  const bar5 = widget.addImage(drawBar(130, 6, barRatio(p5), mainColor, trackColor));
-  bar5.imageSize = new Size(130, 6);
-  bar5.leftAlignImage();
+  const mid = widget.addStack();
+  mid.centerAlignContent();
+  const ring = mid.addImage(drawRing(64, barRatio(p5),
+    p5 == null ? "--" : String(Math.round(p5)), {
+      fill: mainColor, track: trackColor, text: Color.white(),
+      sub: "5hr", subColor: GRAY,
+    }));
+  ring.imageSize = new Size(64, 64);
+  mid.addSpacer();
+  const col = mid.addStack();
+  col.layoutVertically();
+  const wl = col.addText("Weekly");
+  wl.font = Font.systemFont(10);
+  wl.textColor = GRAY;
+  const wv = col.addText((p7 == null ? "--" : Math.round(p7)) + "%");
+  wv.font = Font.boldSystemFont(20);
+  wv.textColor = stale ? GRAY : Color.white();
+  col.addSpacer(4);
+  const wr = col.addText("↻" + relTime(cc.seven_day && cc.seven_day.resets_at));
+  wr.font = Font.systemFont(9);
+  wr.textColor = GRAY;
 
-  widget.addSpacer(8);
-  const wLabel = widget.addText("Weekly " + (p7 == null ? "--" : Math.round(p7)) + "%");
-  wLabel.font = Font.systemFont(11);
-  wLabel.textColor = stale ? gray : Color.white();
-  widget.addSpacer(3);
-  const bar7 = widget.addImage(drawBar(130, 6, barRatio(p7), weeklyColor, trackColor));
-  bar7.imageSize = new Size(130, 6);
+  widget.addSpacer(6);
+  const bar7 = widget.addImage(drawBar(124, 6, barRatio(p7), weeklyColor, trackColor));
+  bar7.imageSize = new Size(124, 6);
   bar7.leftAlignImage();
 
-  widget.addSpacer();
+  widget.addSpacer(5);
   const foot = widget.addText(stale
     ? "更新於 " + hhmm(p.updated_at)
     : "↻ 5hr " + relTime(cc.five_hour && cc.five_hour.resets_at) +
       " · 7d " + relTime(cc.seven_day && cc.seven_day.resets_at));
   foot.font = Font.systemFont(9);
-  foot.textColor = gray;
+  foot.textColor = GRAY;
+}
+
+// (E) 主畫面 medium：四條進度條（5hr / Weekly / Opus / Sonnet）
+function renderMedium(widget, p) {
+  widget.backgroundColor = new Color("#1c1c1e");
+  widget.setPadding(14, 16, 12, 16);
+  const cc = p && p.claude_code;
+  if (!cc) { renderNoData(widget, "無資料"); return; }
+  const stale = isStale(p);
+  const trackColor = new Color("#3a3a3c");
+  const weeklyColor = stale ? GRAY : new Color("#6e8cae");
+
+  addHeader(widget, p, stale,
+    "Claude Code" + (p.machine ? " · " + p.machine : ""));
+  widget.addSpacer(6);
+
+  const rows = [
+    ["5hr", pctOf(cc.five_hour), tone(pctOf(cc.five_hour), stale)],
+    ["Weekly", pctOf(cc.seven_day), weeklyColor],
+    ["Opus", pctOf(cc.seven_day_opus), weeklyColor],
+    ["Sonnet", pctOf(cc.seven_day_sonnet), weeklyColor],
+  ];
+  for (const [label, pct, color] of rows) {
+    if (pct == null && label !== "5hr" && label !== "Weekly") continue; // Opus/Sonnet 沒資料就略過
+    const row = widget.addStack();
+    row.centerAlignContent();
+    const lt = row.addText(label);
+    lt.font = Font.systemFont(10);
+    lt.textColor = GRAY;
+    lt.lineLimit = 1;
+    row.addSpacer();
+    const bar = row.addImage(drawBar(200, 6, barRatio(pct), color, trackColor));
+    bar.imageSize = new Size(200, 6);
+    row.addSpacer(8);
+    const vt = row.addText((pct == null ? "--" : Math.round(pct)) + "%");
+    vt.font = Font.boldSystemFont(12);
+    vt.textColor = stale ? GRAY : Color.white();
+    widget.addSpacer(4);
+  }
+
+  widget.addSpacer();
+  const foot = widget.addText(stale
+    ? "資料過期 · 更新於 " + hhmm(p.updated_at)
+    : "↻ 5hr " + relTime(cc.five_hour && cc.five_hour.resets_at) +
+      " · 7d " + relTime(cc.seven_day && cc.seven_day.resets_at) +
+      " · 更新 " + hhmm(p.updated_at));
+  foot.font = Font.systemFont(9);
+  foot.textColor = GRAY;
 }
 
 // ---------- 主流程 ----------
 
 async function run() {
-  const payload = await loadPayload();
+  const payloads = await loadPayloads();
+  const payload = pickPayload(payloads);
   const family = config.widgetFamily || "small"; // App 內預覽預設 small
   const widget = new ListWidget();
   widget.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000); // 建議值，iOS 自行調度
+  if (DASHBOARD_URL) widget.url = DASHBOARD_URL; // 點擊跳轉 dashboard
 
   if (family === "accessoryRectangular") {
     renderRectangular(widget, payload);
@@ -292,8 +398,10 @@ async function run() {
     renderInline(widget, payload);
   } else if (family === "small") {
     renderSmall(widget, payload);
+  } else if (family === "medium") {
+    renderMedium(widget, payload);
   } else {
-    renderNoData(widget, "請使用鎖屏或 small widget");
+    renderNoData(widget, "請使用鎖屏、small 或 medium widget");
   }
 
   if (config.runsInWidget) {
@@ -304,6 +412,8 @@ async function run() {
     await widget.presentAccessoryCircular();
   } else if (family === "accessoryInline") {
     await widget.presentAccessoryInline();
+  } else if (family === "medium") {
+    await widget.presentMedium();
   } else {
     await widget.presentSmall();
   }
