@@ -1,4 +1,4 @@
-# 建立 Windows 排程工作 "CCUsageRelay"：每 5 分鐘以 pythonw 背景執行 agent.py
+﻿# 建立 Windows 排程工作 "CCUsageRelay"：每 5 分鐘以 pythonw 背景執行 agent.py
 $ErrorActionPreference = "Stop"
 
 $repoRoot  = Split-Path -Parent $PSScriptRoot

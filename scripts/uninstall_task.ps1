@@ -1,4 +1,4 @@
-# 移除排程工作 "CCUsageRelay"
+﻿# 移除排程工作 "CCUsageRelay"
 schtasks /Delete /TN "CCUsageRelay" /F
 if ($LASTEXITCODE -eq 0) {
     Write-Host "已移除排程 CCUsageRelay。"

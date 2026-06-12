@@ -17,7 +17,7 @@ cc-usage-relay — Claude Code 用量 widget（鎖屏為主力）
 */
 
 // ===== 使用者需要改的地方 =====
-const GIST_RAW_URL = "https://gist.githubusercontent.com/<user>/<id>/raw/usage.json";
+const GIST_RAW_URL = "https://gist.githubusercontent.com/zhcknck/9585fb88cf03a9982de3e2b9b2fc0299/raw/usage.json";
 const STALE_MINUTES = 20;
 // 點 widget 開啟的網址（GitHub Pages dashboard），留空 = 開 Scriptable
 const DASHBOARD_URL = "";
