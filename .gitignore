@@ -1,0 +1,8 @@
+# 機密設定與執行期產物 — 絕不入版控
+config.json
+state.json
+*.log
+
+# Python
+__pycache__/
+*.pyc

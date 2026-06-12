@@ -1,0 +1,10 @@
+{
+  "gist_id": "",
+  "github_token": "",
+  "discord_webhook": "",
+  "threshold_5h_pct": 90,
+  "threshold_weekly_pct": 90,
+  "machine_name": "PC",
+  "wsl_credentials_path": "",
+  "user_agent_version": "2.0.0"
+}
