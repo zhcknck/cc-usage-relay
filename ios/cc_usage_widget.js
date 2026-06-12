@@ -459,10 +459,10 @@ function renderSmall(widget, p, etaMin) {
   if (stale) {
     const sr = staleReason(p);
     addDuoText(widget, "更新於 ", hhmm(p.updated_at) + (sr ? " · " + sr : ""), 10, GRAY);
-  } else if (etaMin != null) {
-    addDuoText(widget, "約 ", fmtMinutes(etaMin) + " 後達上限", 10, ORANGE);
   } else {
-    addDuoText(widget, "重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
+    addDuoText(widget, "5hr 重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
+    widget.addSpacer(3);
+    addDuoText(widget, "週 重置 ", relTime(cc.seven_day && cc.seven_day.resets_at), 10, TEAL);
   }
 }
 
