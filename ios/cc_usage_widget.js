@@ -112,6 +112,10 @@ function pickPayload(payloads) {
     const hit = payloads.find(p => p.machine === MACHINE_NAME);
     if (hit) return hit;
   }
+  // 預設顯示「正在用的」帳號（agent 標記本機當前登入者 active=true）。
+  // 多個或無 active 時退回下面「用最兇」的規則。
+  const actives = payloads.filter(p => p.active === true);
+  if (actives.length === 1) return actives[0];
   // 多帳號預設顯示「用最兇」的那個（5hr% 最高）——輪流用、爆了才換的情境下，
   // 永遠盯住即將要換掉的帳號。非過期優先；同樣高時取重置最快的；全過期才退回最新。
   const fresh = payloads.filter(p => !isStale(p));

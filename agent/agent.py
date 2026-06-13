@@ -18,6 +18,7 @@ agent 會用 refresh token 自行續期並寫回副本（絕不碰 ~/.claude 的
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ LOG_MAX_BYTES = 1024 * 1024
 LOCK_STALE_SECONDS = 300  # 鎖檔超過此秒數視為前次異常殘留
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+PROFILE_URL = "https://api.anthropic.com/api/oauth/profile"
 GIST_API = "https://api.github.com/gists/{gist_id}"
 OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
 OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code 公開 client id
@@ -376,6 +378,61 @@ def fetch_usage(token, cfg):
         log.warning("usage 端點回應 HTTP %d", status)
         return None, "fail"
     return None, "fail"
+
+
+def fetch_account_uuid(token, cfg):
+    """profile 端點取帳號 uuid——跨登入/換 token 都穩定，用來判斷
+    本機當前登入的是哪個帳號（標記 widget 顯示「正在用的」）。失敗回 None。"""
+    headers = {
+        "Authorization": "Bearer " + token,
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": "claude-code/" + str(cfg["user_agent_version"]),
+    }
+    status, data, _ = http("GET", PROFILE_URL, headers=headers)
+    if status == 200 and isinstance(data, dict):
+        uuid = (data.get("account") or {}).get("uuid")
+        if isinstance(uuid, str) and uuid:
+            return uuid
+    return None
+
+
+def ensure_account_uuid(cfg, cred, acc):
+    """回傳帳號 uuid：副本檔已快取就直接用（免打 API、token 失效也拿得到）；
+    沒有才抓一次並寫回副本檔。絕不寫入本機 ~/.claude（避免污染 Claude Code 檔）。"""
+    raw = cred.get("raw") or {}
+    cached = raw.get("_ccRelayAccountUuid")
+    if isinstance(cached, str) and cached:
+        return cached
+    uuid = fetch_account_uuid(cred["token"], cfg)
+    if uuid and acc.get("credentials_path"):
+        raw["_ccRelayAccountUuid"] = uuid
+        try:
+            atomic_write(Path(acc["credentials_path"]),
+                         json.dumps(raw, ensure_ascii=False, indent=2))
+        except OSError:
+            pass
+    return uuid
+
+
+def current_active_uuid(cfg, state):
+    """本機 ~/.claude 當前登入帳號的 uuid。以 token 雜湊快取，
+    只在換帳號/換 token 時才打一次 profile。"""
+    path = Path.home() / ".claude" / ".credentials.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        token = (data.get("claudeAiOauth") or {}).get("accessToken")
+    except (OSError, ValueError):
+        return None
+    if not token:
+        return None
+    h = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+    cache = state.get("active_uuid_cache") or {}
+    if cache.get("h") == h and cache.get("uuid"):
+        return cache["uuid"]
+    uuid = fetch_account_uuid(token, cfg)
+    if uuid:
+        state["active_uuid_cache"] = {"h": h, "uuid": uuid}
+    return uuid
 
 
 def usage_schema_ok(usage):
@@ -821,6 +878,7 @@ def run_once(cfg, state, trigger):
     secrets = secret_pairs(cfg)
     own_entries = []   # 本機所有帳號這一輪的條目（fresh 或 stale）
     fresh = []         # [(account_state, payload)] 僅成功取得新數據者
+    acc_uuids = {}     # label -> 帳號 uuid（判斷哪張卡是「正在用的」）
 
     for acc in accounts:
         label = account_label(cfg, acc["name"])
@@ -833,6 +891,7 @@ def run_once(cfg, state, trigger):
         secrets.append(("access_token", cred["token"]))
         if cred.get("refresh_token"):
             secrets.append(("refresh_token", cred["refresh_token"]))
+        acc_uuids[label] = ensure_account_uuid(cfg, cred, acc)
 
         if cred["expires_at"] <= time.time():
             refreshed = None
@@ -874,6 +933,11 @@ def run_once(cfg, state, trigger):
         payload = build_payload(label, usage)
         fresh.append((st, payload))
         own_entries.append(payload)
+
+    # 標記「正在用的」帳號：本機當前登入 uuid 對上哪張卡就標 active=true
+    active_uuid = current_active_uuid(cfg, state)
+    for entry in own_entries:
+        entry["active"] = bool(active_uuid and acc_uuids.get(entry.get("machine")) == active_uuid)
 
     existing, history = fetch_gist_files(cfg)
     merged = merge_machines(existing, own_entries, float(cfg["machine_ttl_hours"]))
