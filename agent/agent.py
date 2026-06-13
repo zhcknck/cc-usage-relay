@@ -221,21 +221,45 @@ def release_lock():
 
 # ---------- 帳號與 credentials ----------
 
+ACCOUNTS_DIR = BASE_DIR / "accounts"
+
+
 def load_account_list(cfg):
-    """accounts 設定正規化；未設定 = 單一預設帳號（本機 ~/.claude）。"""
+    """組合帳號清單（去重）：
+    1. 預設帳號（本機 ~/.claude，由 Claude Code 自管，不續期）— 永遠包含
+    2. config 的 accounts 明確指定者
+    3. 自動掃描 agent/accounts/*.credentials.json（檔名即帳號名，自動續期）
+    讓多帳號只需把 credentials 副本丟進資料夾，免改設定。"""
+    out = [{"name": "", "credentials_path": "", "auto_refresh": False}]
+    seen_paths = set()
+
     accs = cfg.get("accounts")
-    out = []
     if isinstance(accs, list):
         for a in accs:
             if not isinstance(a, dict):
                 continue
-            out.append({
-                "name": str(a.get("name") or "").strip(),
-                "credentials_path": str(a.get("credentials_path") or "").strip(),
-                "auto_refresh": bool(a.get("auto_refresh")),
-            })
-    if not out:
-        out = [{"name": "", "credentials_path": "", "auto_refresh": False}]
+            name = str(a.get("name") or "").strip()
+            path = str(a.get("credentials_path") or "").strip()
+            if not name and not path:
+                continue  # 空白條目＝預設帳號，已在 out[0]
+            if path:
+                seen_paths.add(str(Path(path).resolve()))
+            out.append({"name": name, "credentials_path": path,
+                        "auto_refresh": bool(a.get("auto_refresh"))})
+
+    try:
+        files = sorted(ACCOUNTS_DIR.glob("*.credentials.json")) if ACCOUNTS_DIR.is_dir() else []
+    except OSError:
+        files = []
+    seen_names = {a["name"] for a in out}
+    for f in files:
+        if str(f.resolve()) in seen_paths:
+            continue  # config 已明確指定，不重複
+        name = f.name[:-len(".credentials.json")].strip()
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
+        out.append({"name": name, "credentials_path": str(f), "auto_refresh": True})
     return out
 
 

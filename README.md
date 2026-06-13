@@ -124,26 +124,26 @@ WSL 內的 Claude Code 需另行配置對應的 bash 觸發指令。
 
 ## 多帳號
 
-同一台機器追蹤兩三個 Claude 帳號的原理：Claude Code 一次只登入一個帳號
-（`~/.claude/.credentials.json` 會被切換覆寫），所以其他帳號要用 **credentials 副本**：
+同時追蹤兩三個 Claude 帳號的原理：Claude Code 一次只登入一個帳號
+（`~/.claude/.credentials.json` 會被切換覆寫），所以其他帳號要用 **credentials 副本**。
+最簡流程（免改設定，每個額外帳號做一次）：
 
-1. 在 Claude Code 登入帳號 B → 複製 `%USERPROFILE%\.claude\.credentials.json`
-   到 `agent\accounts\b.credentials.json`（`accounts/` 已在 .gitignore）
-2. 切回主帳號，config 填：
+1. 在 Claude Code 登入要追蹤的帳號
+2. 跑 `python scripts\capture_account.py 帳號名`
+   （把當前 credentials 複製到 `agent\accounts\帳號名.credentials.json`）
+3. 重複 1–2 收集其他帳號
+4. **切回平常用的主帳號**
 
-```json
-"accounts": [
-  { "name": "",  "credentials_path": "", "auto_refresh": false },
-  { "name": "B", "credentials_path": "C:\\\\...\\\\agent\\\\accounts\\\\b.credentials.json", "auto_refresh": true }
-]
-```
+agent 會自動掃描 `agent\accounts\*.credentials.json`，每個檔當成一個帳號
+（檔名即帳號名，自動續期），**完全不用編輯 config**。`accounts/` 已在 .gitignore。
 
-- 第一條是預設帳號（本機 `~/.claude`，由 Claude Code 自己刷新 token，agent 不碰）
-- 副本帳號設 `auto_refresh: true`：token 過期時 agent 用 refresh token
-  自動續期並寫回副本檔，長期免維護
-- 每個帳號在 gist 是獨立條目，名稱為 `機器名·帳號名`（如 `ZHCK·B`）；
+- 本機 `~/.claude` 的主帳號永遠包含（由 Claude Code 自管 token，agent 不碰）
+- 副本帳號 token 過期時 agent 用 refresh token 自動續期並寫回，長期免維護
+  （若該份 credentials 無 refreshToken，到期後需重新登入再 capture 一次）
+- 每個帳號在 gist 是獨立條目，名稱為 `機器名·帳號名`（如 `ZHCK·工作`）；
   dashboard 一帳號一卡片，widget 用 `MACHINE_NAME` 挑選或自動取最新
-- 通知去重按帳號獨立計算，內文會標註來源名稱
+- 通知按帳號獨立判斷（閾值、重置時間都各算），內文標註來源名稱
+- 進階：仍可用 config 的 `accounts` 陣列明確指定路徑（與資料夾掃描去重合併）
 
 ## 已知限制
 
