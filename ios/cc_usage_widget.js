@@ -112,8 +112,26 @@ function pickPayload(payloads) {
     const hit = payloads.find(p => p.machine === MACHINE_NAME);
     if (hit) return hit;
   }
-  return payloads.slice().sort((a, b) =>
-    new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0];
+  // 多帳號預設顯示「用最兇」的那個（5hr% 最高）——輪流用、爆了才換的情境下，
+  // 永遠盯住即將要換掉的帳號。非過期優先；同樣高時取重置最快的；全過期才退回最新。
+  const fresh = payloads.filter(p => !isStale(p));
+  const pool = fresh.length ? fresh : payloads;
+  const p5 = (p) => {
+    const v = p && p.claude_code && p.claude_code.five_hour && p.claude_code.five_hour.pct;
+    return typeof v === "number" ? v : -1;
+  };
+  const resetMs = (p) => {
+    const r = p && p.claude_code && p.claude_code.five_hour && p.claude_code.five_hour.resets_at;
+    const t = r ? new Date(r).getTime() : NaN;
+    return isFinite(t) ? t : Infinity;
+  };
+  return pool.slice().sort((a, b) => {
+    const d = p5(b) - p5(a);
+    if (Math.abs(d) > 0.01) return d;            // 5hr% 高的優先
+    const r = resetMs(a) - resetMs(b);
+    if (r !== 0) return r;                        // 同樣高 → 重置較快的優先
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  })[0];
 }
 
 function isStale(p) {
@@ -244,6 +262,14 @@ function renderNoData(widget, msg) {
   const t = widget.addText(msg || "無資料");
   t.font = Font.systemFont(12);
   t.textOpacity = 0.8;
+}
+
+// 多帳號時 machine 形如「機器名·帳號名」，取「·」後的帳號名當標題；
+// 沒有帳號名（單機）就顯示 Claude Code
+function accountTitle(p) {
+  const m = (p && p.machine) || "";
+  const i = m.indexOf("·");
+  return i >= 0 ? m.slice(i + 1) : "Claude Code";
 }
 
 // 「● Claude Code」標題列 + 右側 $ / STALE 徽章
@@ -432,7 +458,7 @@ function renderSmall(widget, p, etaMin) {
   const mainColor = tone(p5, stale);
   const weeklyColor = stale ? GRAY : TEAL;
 
-  addHeader(widget, p, stale, "Claude Code");
+  addHeader(widget, p, stale, accountTitle(p));
   widget.addSpacer(2);
   addBigPct(widget, p5, mainColor, 34);
   widget.addSpacer();
