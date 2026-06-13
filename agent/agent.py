@@ -652,6 +652,46 @@ def is_new_window(old_iso, new_iso, tol_seconds=180):
     return abs((a - b).total_seconds()) > tol_seconds
 
 
+def fire_reset(cfg, rec, wlabel, label, always_reset):
+    """發額度重置解除通知並標記 reset_done。
+    時間觸發（notify_due_resets）與視窗換新觸發（process_notifications）共用，
+    靠 reset_done 旗標避免同一視窗重複通知。"""
+    if rec.get("reset_done"):
+        return
+    levels = rec.get("levels") or []
+    if not levels and not always_reset:
+        rec["reset_done"] = True  # 本視窗沒警告過也沒開「一律通知」→ 不發，但標記已處理
+        return
+    rec["reset_done"] = True
+    if levels:
+        body = "上一視窗曾達 %d%% 閾值，現已重置，可繼續使用。（%s）" % (max(levels), label)
+    else:
+        body = "%s額度已重置，可繼續使用。（%s）" % (wlabel, label)
+    notify_all(cfg, "✅ Claude Code %s額度已重置" % wlabel, body, COLOR_GREEN)
+    log.info("已發送 %s 重置通知（%s）", wlabel.strip(), label)
+
+
+def notify_due_resets(cfg, state):
+    """5hr 重置時間一到就主動通知——不依賴 API 回報新視窗，
+    所以閒置等待或額度用爆（API 回應異常走 stale）時也能準時提醒。
+    每視窗只發一次；每輪執行都檢查（不需抓資料成功）。"""
+    if not has_channels(cfg):
+        return
+    always_5h = bool(cfg.get("notify_5h_reset_always"))
+    now = time.time()
+    for label, st in (state.get("accounts_state") or {}).items():
+        rec = st.get("notify_5h")
+        if not isinstance(rec, dict) or rec.get("reset_done") or not rec.get("resets_at"):
+            continue
+        try:
+            target = datetime.fromisoformat(
+                str(rec["resets_at"]).replace("Z", "+00:00")).timestamp()
+        except (ValueError, OverflowError, OSError):
+            continue
+        if now >= target:
+            fire_reset(cfg, rec, "5hr ", label, always_5h)
+
+
 def process_notifications(cfg, st, payload, label):
     """多級閾值通知 + 視窗去重；resets_at 改變時清除紀錄並發解除通知。
     無渠道時整段跳過（不記錄已發送，之後補設渠道仍會在本視窗內補通知）。"""
@@ -676,18 +716,9 @@ def process_notifications(cfg, st, payload, label):
         if not isinstance(rec, dict):
             rec = {}
         if is_new_window(rec.get("resets_at"), resets_at):
-            had_prior = bool(rec.get("resets_at"))  # 首次觀測不算重置，避免 agent 啟動即誤報
-            if rec.get("levels"):
-                # 曾警告過 → 解除通知
-                notify_all(cfg, "✅ Claude Code %s額度已重置" % wlabel,
-                           "上一視窗曾達 %d%% 閾值，現已重置，可繼續使用。（%s）"
-                           % (max(rec["levels"]), label),
-                           COLOR_GREEN)
-            elif always_reset and had_prior:
-                # 沒警告過也通知（使用者要求：只要 5hr 重置就提醒）
-                notify_all(cfg, "✅ Claude Code %s額度已重置" % wlabel,
-                           "5hr 額度已重置，可繼續使用。（%s）" % label,
-                           COLOR_GREEN)
+            # 視窗換新：若上一視窗的重置尚未由時間觸發通知過，這裡補一則
+            if rec.get("resets_at"):  # 首次觀測不算重置，避免 agent 啟動即誤報
+                fire_reset(cfg, rec, wlabel, label, always_reset)
             rec = {"resets_at": resets_at, "levels": []}
         # 同一視窗內保留首次記錄的 resets_at（不隨抖動更新，避免累積漂移超出容差）
 
@@ -806,11 +837,16 @@ def run_once(cfg, state, trigger):
     for _, payload in fresh:
         history = append_history(cfg, history, payload)
 
+    # 時間到的 5hr 重置主動通知——獨立於抓資料/推 gist 是否成功，
+    # 確保閒置等待或 API 異常時也能準時提醒「可以再用了」
+    notify_due_resets(cfg, state)
+
     usage_text = json.dumps(merged, ensure_ascii=False, indent=2)
     history_text = json.dumps(history, ensure_ascii=False)
     hits = scan_for_secrets(usage_text + history_text, secrets)
     if hits:
         log.error("payload 含機密標記，拒絕推送: %s", hits)
+        save_state(state)
         return
 
     try:
