@@ -342,8 +342,9 @@ def refresh_credentials(cred):
 # ---------- usage 端點 ----------
 
 def fetch_usage(token, cfg):
-    """成功回傳 usage dict；429 退避重試、連線失敗重試一次後仍失敗、
-    401 或其他狀態回傳 None（走 stale 路徑）。"""
+    """回傳 (usage_dict_or_None, reason)：
+    reason ∈ {"ok","401","fail"}。401 與一般失敗分開，讓呼叫端可在 401 時
+    用 refreshToken 續期後重試（捕捉 token 被提前撤銷的情況）。"""
     headers = {
         "Authorization": "Bearer " + token,
         "anthropic-beta": "oauth-2025-04-20",
@@ -358,9 +359,9 @@ def fetch_usage(token, cfg):
                 conn_retried = True
                 time.sleep(CONN_RETRY_DELAY)
                 continue
-            return None
+            return None, "fail"
         if status == 200:
-            return data if isinstance(data, dict) else None
+            return (data, "ok") if isinstance(data, dict) else (None, "fail")
         if status == 429:
             if i < len(RETRY_DELAYS):
                 log.warning("usage 429，%d 秒後重試", RETRY_DELAYS[i])
@@ -368,13 +369,13 @@ def fetch_usage(token, cfg):
                 i += 1
                 continue
             log.warning("usage 429，重試次數用盡")
-            return None
+            return None, "fail"
         if status == 401:
             log.warning("usage 401（token 無效或已撤銷）")
-            return None
+            return None, "401"
         log.warning("usage 端點回應 HTTP %d", status)
-        return None
-    return None
+        return None, "fail"
+    return None, "fail"
 
 
 def usage_schema_ok(usage):
@@ -847,9 +848,20 @@ def run_once(cfg, state, trigger):
                 own_entries.append(stale_entry(label, st, "token 已過期"))
                 continue
 
-        usage = fetch_usage(cred["token"], cfg)
+        usage, reason = fetch_usage(cred["token"], cfg)
+        # 401＝token 被提前撤銷（例如同帳號在別處重新登入）；
+        # 副本帳號可用 refreshToken 換新後重試一次
+        if reason == "401" and acc["auto_refresh"] and acc["credentials_path"] and cred.get("refresh_token"):
+            refreshed = refresh_credentials(cred)
+            if refreshed:
+                cred = refreshed
+                secrets.append(("access_token", cred["token"]))
+                if cred.get("refresh_token"):
+                    secrets.append(("refresh_token", cred["refresh_token"]))
+                usage, reason = fetch_usage(cred["token"], cfg)
         if usage is None:
-            own_entries.append(stale_entry(label, st, "usage 端點失敗"))
+            own_entries.append(stale_entry(label, st,
+                "token 已失效" if reason == "401" else "usage 端點失敗"))
             continue
         if not usage_schema_ok(usage):
             # 記下結構（不含值）以便下次格式異常時對症修正——
