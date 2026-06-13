@@ -624,6 +624,19 @@ def notify_all(cfg, title, body, color):
     return delivered
 
 
+def is_new_window(old_iso, new_iso, tol_seconds=180):
+    """resets_at 含秒/微秒級抖動（同一視窗每次查詢會差一兩秒），
+    差距在 tol_seconds 內視為同一視窗，避免假性重置造成通知洗版。"""
+    if not old_iso:
+        return True
+    try:
+        a = datetime.fromisoformat(str(old_iso).replace("Z", "+00:00"))
+        b = datetime.fromisoformat(str(new_iso).replace("Z", "+00:00"))
+    except ValueError:
+        return old_iso != new_iso
+    return abs((a - b).total_seconds()) > tol_seconds
+
+
 def process_notifications(cfg, st, payload, label):
     """多級閾值通知 + 視窗去重；resets_at 改變時清除紀錄並發解除通知。
     無渠道時整段跳過（不記錄已發送，之後補設渠道仍會在本視窗內補通知）。"""
@@ -645,7 +658,7 @@ def process_notifications(cfg, st, payload, label):
         rec = st.get(state_key)
         if not isinstance(rec, dict):
             rec = {}
-        if rec.get("resets_at") != resets_at:
+        if is_new_window(rec.get("resets_at"), resets_at):
             # 視窗重置：曾發過警告才發解除通知
             if rec.get("levels"):
                 notify_all(cfg, "✅ Claude Code %s額度已重置" % wlabel,
@@ -653,6 +666,7 @@ def process_notifications(cfg, st, payload, label):
                            % (max(rec["levels"]), label),
                            COLOR_GREEN)
             rec = {"resets_at": resets_at, "levels": []}
+        # 同一視窗內保留首次記錄的 resets_at（不隨抖動更新，避免累積漂移超出容差）
 
         crossed = [lv for lv in thresholds if pct >= lv and lv not in rec["levels"]]
         if crossed:
