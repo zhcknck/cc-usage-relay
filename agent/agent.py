@@ -355,6 +355,20 @@ def usage_schema_ok(usage):
             and isinstance(fh.get("resets_at"), str))
 
 
+def describe_shape(obj, depth=2):
+    """安全描述 JSON 結構：只記 key 與型別、不記實際值，
+    用於診斷端點格式變動（例如額度用爆時 100% 的回應結構）。"""
+    if isinstance(obj, dict):
+        if depth <= 0:
+            return "{...}"
+        return "{" + ", ".join(
+            "%s:%s" % (k, describe_shape(v, depth - 1))
+            for k, v in list(obj.items())[:25]) + "}"
+    if isinstance(obj, list):
+        return "[%s]" % (describe_shape(obj[0], depth - 1) if obj else "")
+    return type(obj).__name__
+
+
 def _pick_window(block):
     """白名單欄位：只取 utilization 與 resets_at。"""
     if not isinstance(block, dict):
@@ -767,6 +781,9 @@ def run_once(cfg, state, trigger):
             own_entries.append(stale_entry(label, st, "usage 端點失敗"))
             continue
         if not usage_schema_ok(usage):
+            # 記下結構（不含值）以便下次格式異常時對症修正——
+            # 已知額度用爆 100% 時端點回應結構會與平常不同
+            log.warning("usage 結構異常（%s），shape=%s", label, describe_shape(usage))
             alert_endpoint_change(cfg, state)
             own_entries.append(stale_entry(label, st, "usage 回應格式異常"))
             continue
