@@ -143,6 +143,7 @@ def load_config():
     cfg.setdefault("windows_toast", False)
     cfg.setdefault("threshold_5h_pct", 90)
     cfg.setdefault("threshold_weekly_pct", 90)
+    cfg.setdefault("notify_5h_reset_always", False)
     cfg.setdefault("machine_name", "PC")
     cfg.setdefault("wsl_credentials_path", "")
     cfg.setdefault("user_agent_version", "2.0.0")
@@ -657,11 +658,13 @@ def process_notifications(cfg, st, payload, label):
     if not has_channels(cfg):
         return
     cc = payload.get("claude_code") or {}
+    always_5h = bool(cfg.get("notify_5h_reset_always"))
     rules = [
-        ("five_hour", "5hr ", get_thresholds(cfg, "thresholds_5h_pct", "threshold_5h_pct"), "notify_5h"),
-        ("seven_day", "週", get_thresholds(cfg, "thresholds_weekly_pct", "threshold_weekly_pct"), "notify_7d"),
+        # (端點 key, 顯示名, 閾值, state key, 無警告也通知重置)
+        ("five_hour", "5hr ", get_thresholds(cfg, "thresholds_5h_pct", "threshold_5h_pct"), "notify_5h", always_5h),
+        ("seven_day", "週", get_thresholds(cfg, "thresholds_weekly_pct", "threshold_weekly_pct"), "notify_7d", False),
     ]
-    for window, wlabel, thresholds, state_key in rules:
+    for window, wlabel, thresholds, state_key, always_reset in rules:
         block = cc.get(window) or {}
         pct = block.get("pct")
         resets_at = block.get("resets_at")
@@ -673,11 +676,17 @@ def process_notifications(cfg, st, payload, label):
         if not isinstance(rec, dict):
             rec = {}
         if is_new_window(rec.get("resets_at"), resets_at):
-            # 視窗重置：曾發過警告才發解除通知
+            had_prior = bool(rec.get("resets_at"))  # 首次觀測不算重置，避免 agent 啟動即誤報
             if rec.get("levels"):
+                # 曾警告過 → 解除通知
                 notify_all(cfg, "✅ Claude Code %s額度已重置" % wlabel,
-                           "上一視窗曾達 %d%% 閾值，現已重置。（%s）"
+                           "上一視窗曾達 %d%% 閾值，現已重置，可繼續使用。（%s）"
                            % (max(rec["levels"]), label),
+                           COLOR_GREEN)
+            elif always_reset and had_prior:
+                # 沒警告過也通知（使用者要求：只要 5hr 重置就提醒）
+                notify_all(cfg, "✅ Claude Code %s額度已重置" % wlabel,
+                           "5hr 額度已重置，可繼續使用。（%s）" % label,
                            COLOR_GREEN)
             rec = {"resets_at": resets_at, "levels": []}
         # 同一視窗內保留首次記錄的 resets_at（不隨抖動更新，避免累積漂移超出容差）
