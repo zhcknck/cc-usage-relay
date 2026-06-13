@@ -436,13 +436,15 @@ def current_active_uuid(cfg, state):
 
 
 def usage_schema_ok(usage):
-    """端點格式驗證：five_hour.utilization 數值 + resets_at 字串才視為有效。"""
+    """端點格式驗證：five_hour.utilization 為數值即可。
+    resets_at 允許 null——額度用爆 100% 時端點會把它設為 null（非格式變動）。"""
     if not isinstance(usage, dict):
         return False
     fh = usage.get("five_hour")
-    return (isinstance(fh, dict)
-            and isinstance(fh.get("utilization"), (int, float))
-            and isinstance(fh.get("resets_at"), str))
+    if not isinstance(fh, dict) or not isinstance(fh.get("utilization"), (int, float)):
+        return False
+    ra = fh.get("resets_at")
+    return ra is None or isinstance(ra, str)
 
 
 def describe_shape(obj, depth=2):
@@ -489,6 +491,22 @@ def build_payload(label, usage):
         },
         "extra_usage": _pick_extra(usage.get("extra_usage")),
     }
+
+
+def backfill_resets(payload, st):
+    """額度用爆時 resets_at 會變 null；沿用 last_payload 的同視窗重置時間，
+    讓 widget/dashboard 在 100% 時仍顯示倒數而非『--』。"""
+    last = st.get("last_payload")
+    if not isinstance(last, dict):
+        return
+    cur_cc = payload.get("claude_code") or {}
+    last_cc = last.get("claude_code") or {}
+    for key in ("five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"):
+        cur = cur_cc.get(key)
+        prev = last_cc.get(key)
+        if isinstance(cur, dict) and not cur.get("resets_at") \
+                and isinstance(prev, dict) and prev.get("resets_at"):
+            cur["resets_at"] = prev["resets_at"]
 
 
 def stale_entry(label, st, reason):
@@ -931,6 +949,7 @@ def run_once(cfg, state, trigger):
             continue
 
         payload = build_payload(label, usage)
+        backfill_resets(payload, st)  # 用爆時 resets_at=null，沿用上一筆讓倒數不消失
         fresh.append((st, payload))
         own_entries.append(payload)
 
