@@ -226,11 +226,15 @@ ACCOUNTS_DIR = BASE_DIR / "accounts"
 
 def load_account_list(cfg):
     """組合帳號清單（去重）：
-    1. 預設帳號（本機 ~/.claude，由 Claude Code 自管，不續期）— 永遠包含
+    1. 預設帳號（本機 ~/.claude，由 Claude Code 自管，不續期）—
+       track_default_account 為 false 時不納入（讓三個帳號全由 capture 明確命名，
+       避免「當前登入帳號」自動冒出一張會跟著切換變動的 ZHCK 卡）
     2. config 的 accounts 明確指定者
     3. 自動掃描 agent/accounts/*.credentials.json（檔名即帳號名，自動續期）
     讓多帳號只需把 credentials 副本丟進資料夾，免改設定。"""
-    out = [{"name": "", "credentials_path": "", "auto_refresh": False}]
+    out = []
+    if cfg.get("track_default_account", True):
+        out.append({"name": "", "credentials_path": "", "auto_refresh": False})
     seen_paths = set()
 
     accs = cfg.get("accounts")
@@ -260,6 +264,9 @@ def load_account_list(cfg):
             continue
         seen_names.add(name)
         out.append({"name": name, "credentials_path": str(f), "auto_refresh": True})
+    if not out:
+        # track_default_account=false 但還沒 capture 任何帳號 → 退回預設，避免空轉
+        out.append({"name": "", "credentials_path": "", "auto_refresh": False})
     return out
 
 

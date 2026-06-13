@@ -15,6 +15,7 @@
   "machine_ttl_hours": 48,
   "daily_summary_hour": null,
   "machine_name": "PC",
+  "track_default_account": true,
   "wsl_credentials_path": "",
   "user_agent_version": "2.0.0",
   "accounts": []
