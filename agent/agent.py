@@ -759,6 +759,25 @@ def is_new_window(old_iso, new_iso, tol_seconds=180):
     return abs((a - b).total_seconds()) > tol_seconds
 
 
+def short_account_name(label):
+    """去掉「機器名·」前綴，只留帳號名（單機無前綴則原樣）。"""
+    i = label.find("·")
+    return label[i + 1:] if i >= 0 else label
+
+
+def switch_suggestion(label, siblings, room_below=90):
+    """其他帳號中 5hr 還有空間（<room_below）的，依剩餘最多排序，組成建議字串。
+    沒有同伴帳號回 ""；同伴都吃緊回提示語。"""
+    others = [(m, p) for (m, p) in (siblings or []) if m != label]
+    if not others:
+        return ""
+    free = sorted((x for x in others if x[1] < room_below), key=lambda x: x[1])
+    if not free:
+        return "\n（其他帳號目前也都接近上限）"
+    return "\n👉 建議切換：" + "、".join(
+        "%s(%d%%)" % (short_account_name(m), round(p)) for m, p in free[:3])
+
+
 def fire_reset(cfg, rec, wlabel, label, always_reset):
     """發額度重置解除通知並標記 reset_done。
     時間觸發（notify_due_resets）與視窗換新觸發（process_notifications）共用，
@@ -799,8 +818,9 @@ def notify_due_resets(cfg, state):
             fire_reset(cfg, rec, "5hr ", label, always_5h)
 
 
-def process_notifications(cfg, st, payload, label):
+def process_notifications(cfg, st, payload, label, siblings=None):
     """多級閾值通知 + 視窗去重；resets_at 改變時清除紀錄並發解除通知。
+    siblings: [(label, 5hr%)] 各帳號用量，5hr 高閾值警告時附「建議切換」。
     無渠道時整段跳過（不記錄已發送，之後補設渠道仍會在本視窗內補通知）。"""
     if not has_channels(cfg):
         return
@@ -836,6 +856,9 @@ def process_notifications(cfg, st, payload, label):
             title = "⚠️ Claude Code %s額度 %d%%" % (wlabel, round(pct))
             body = "已超過 %d%% 閾值，重置於 %s（%s）" % (
                 int(top), relative_time(resets_at), label)
+            # 5hr 高用量時，提示哪個帳號還有空間可切換
+            if window == "five_hour" and top >= 90:
+                body += switch_suggestion(label, siblings)
             if notify_all(cfg, title, body, color):
                 rec["levels"] = sorted(set(rec["levels"]) | set(int(x) for x in crossed))
                 log.info("已發送 %s/%s 閾值 %d%% 通知（resets_at=%s）",
@@ -872,10 +895,6 @@ def maybe_daily_summary(cfg, state, history, own_labels):
     if not has_channels(cfg):
         return
 
-    def acc_name(label):  # 去掉「機器名·」前綴，只留帳號名
-        i = label.find("·")
-        return label[i + 1:] if i >= 0 else label
-
     def dot(pct):  # 依週額度的紅綠燈
         return "🔴" if pct >= 90 else ("🟡" if pct >= 70 else "🟢")
 
@@ -891,7 +910,7 @@ def maybe_daily_summary(cfg, state, history, own_labels):
         peak5 = max(h5s) if h5s else 0
         wk = d7s[-1] if d7s else 0
         rows.append((wk, "%s %s ── 5hr 峰值 %d%% ・ 週 %d%%" % (
-            dot(wk), acc_name(label), peak5, wk)))
+            dot(wk), short_account_name(label), peak5, wk)))
     if not rows:
         return
     rows.sort(key=lambda r: -r[0])  # 用最兇（週額度高）的排最前
@@ -997,9 +1016,16 @@ def run_once(cfg, state, trigger):
         save_state(state)
         return
 
+    # 各帳號當前 5hr%（給「用爆建議切換」用）：只取非過期、有數值者
+    siblings = []
+    for e in own_entries:
+        p5 = ((e.get("claude_code") or {}).get("five_hour") or {}).get("pct")
+        if not e.get("stale") and isinstance(p5, (int, float)):
+            siblings.append((e["machine"], float(p5)))
+
     now = time.time()
     for st, payload in fresh:
-        process_notifications(cfg, st, payload, payload["machine"])
+        process_notifications(cfg, st, payload, payload["machine"], siblings)
         st["last_payload"] = payload
         st.pop("stale_since", None)
         st.pop("stale_alerted", None)
