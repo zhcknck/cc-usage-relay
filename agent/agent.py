@@ -765,6 +765,16 @@ def short_account_name(label):
     return label[i + 1:] if i >= 0 else label
 
 
+def usage_bar(pct, segments=10):
+    """文字進度條，例如 92% -> ▰▰▰▰▰▰▰▰▰▱。"""
+    try:
+        pct = max(0.0, min(100.0, float(pct)))
+    except (TypeError, ValueError):
+        pct = 0.0
+    filled = int(round(pct / 100 * segments))
+    return "▰" * filled + "▱" * (segments - filled)
+
+
 def switch_suggestion(label, siblings, room_below=90):
     """其他帳號中 5hr 還有空間（<room_below）的，依剩餘最多排序，組成建議字串。
     沒有同伴帳號回 ""；同伴都吃緊回提示語。"""
@@ -773,9 +783,9 @@ def switch_suggestion(label, siblings, room_below=90):
         return ""
     free = sorted((x for x in others if x[1] < room_below), key=lambda x: x[1])
     if not free:
-        return "\n（其他帳號目前也都接近上限）"
-    return "\n👉 建議切換：" + "、".join(
-        "%s(%d%%)" % (short_account_name(m), round(p)) for m, p in free[:3])
+        return "\n其他帳號目前也都接近上限"
+    return "\n👉 改用 " + " · ".join(
+        "%s %d%%" % (short_account_name(m), round(p)) for m, p in free[:3])
 
 
 def fire_reset(cfg, rec, wlabel, label, always_reset):
@@ -790,10 +800,10 @@ def fire_reset(cfg, rec, wlabel, label, always_reset):
         return
     rec["reset_done"] = True
     if levels:
-        body = "上一視窗曾達 %d%% 閾值，現已重置，可繼續使用。（%s）" % (max(levels), label)
+        body = "上一輪曾達 %d%%，現已回滿，可繼續使用 🎉" % max(levels)
     else:
-        body = "%s額度已重置，可繼續使用。（%s）" % (wlabel, label)
-    notify_all(cfg, "✅ Claude Code %s額度已重置" % wlabel, body, COLOR_GREEN)
+        body = "額度已回滿，可繼續使用 🎉"
+    notify_all(cfg, "✅ %s · %s已重置" % (short_account_name(label), wlabel), body, COLOR_GREEN)
     log.info("已發送 %s 重置通知（%s）", wlabel.strip(), label)
 
 
@@ -853,9 +863,9 @@ def process_notifications(cfg, st, payload, label, siblings=None):
         if crossed:
             top = max(crossed)
             color = COLOR_RED if top >= 90 else COLOR_ORANGE
-            title = "⚠️ Claude Code %s額度 %d%%" % (wlabel, round(pct))
-            body = "已超過 %d%% 閾值，重置於 %s（%s）" % (
-                int(top), relative_time(resets_at), label)
+            title = "⚠️ %s · %s%d%%" % (short_account_name(label), wlabel, round(pct))
+            body = "%s\n%s 後重置 · 已過 %d%% 閾值" % (
+                usage_bar(pct), relative_time(resets_at), int(top))
             # 5hr 高用量時，提示哪個帳號還有空間可切換
             if window == "five_hour" and top >= 90:
                 body += switch_suggestion(label, siblings)
