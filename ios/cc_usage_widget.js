@@ -276,6 +276,17 @@ function accountTitle(p) {
   return i >= 0 ? m.slice(i + 1) : "Claude Code";
 }
 
+// 當前帳號接近上限時，找其他還有空間（5hr<90）的帳號，剩最多排前面
+function switchHints(p, payloads, max) {
+  return (payloads || [])
+    .filter(q => q !== p && !isStale(q))
+    .map(q => ({ name: accountTitle(q),
+                 p5: pctOf(q.claude_code && q.claude_code.five_hour) }))
+    .filter(q => typeof q.p5 === "number" && q.p5 < 90)
+    .sort((a, b) => a.p5 - b.p5)
+    .slice(0, max);
+}
+
 // 「● Claude Code」標題列 + 右側 $ / STALE 徽章
 function addHeader(stack, p, stale, label) {
   const header = stack.addStack();
@@ -450,8 +461,8 @@ function renderInline(widget, p, etaMin) {
 
 // ---------- 主畫面 family（全彩、橘色版）----------
 
-// (D) small：標題 + 大% + 5HR/WK 進度條 + 重置
-function renderSmall(widget, p, etaMin) {
+// (D) small：標題 + 大% + 5HR/WK 進度條 + 重置（爆掉時末行改顯示建議切換）
+function renderSmall(widget, p, etaMin, payloads) {
   widget.backgroundColor = CARD_BG;
   widget.setPadding(12, 12, 12, 12);
   const cc = p && p.claude_code;
@@ -492,12 +503,18 @@ function renderSmall(widget, p, etaMin) {
   } else {
     addDuoText(widget, "5hr 重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
     widget.addSpacer(3);
-    addDuoText(widget, "週 重置 ", relTime(cc.seven_day && cc.seven_day.resets_at), 10, TEAL);
+    // 爆掉（≥90%）且有其他帳號還有空間 → 末行改顯示建議切換，否則顯示週重置
+    const hints = (p5 != null && p5 >= 90) ? switchHints(p, payloads, 1) : [];
+    if (hints.length) {
+      addDuoText(widget, "→ 改用 ", hints[0].name + " " + Math.round(hints[0].p5) + "%", 10, TEAL);
+    } else {
+      addDuoText(widget, "週 重置 ", relTime(cc.seven_day && cc.seven_day.resets_at), 10, TEAL);
+    }
   }
 }
 
 // (E) medium：左側大% + 燒速率；右側 5hr/Weekly 進度條（含重置時間）
-function renderMedium(widget, p, etaMin) {
+function renderMedium(widget, p, etaMin, payloads) {
   widget.backgroundColor = CARD_BG;
   widget.setPadding(14, 16, 12, 16);
   const cc = p && p.claude_code;
@@ -525,6 +542,13 @@ function renderMedium(widget, p, etaMin) {
   } else {
     addDuoText(left, "重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
   }
+  if (!stale && p5 != null && p5 >= 90) {
+    const h = switchHints(p, payloads, 1);
+    if (h.length) {
+      left.addSpacer(3);
+      addDuoText(left, "→ 改用 ", h[0].name + " " + Math.round(h[0].p5) + "%", 10, TEAL);
+    }
+  }
 
   outer.addSpacer(18);
 
@@ -551,8 +575,8 @@ function renderMedium(widget, p, etaMin) {
   ft.textOpacity = 0.8;
 }
 
-// (F) large：標題 + 大% + 全寬進度條 + 重置藥丸 + 燒速率提示框
-function renderLarge(widget, p, etaMin) {
+// (F) large：標題 + 大% + 全寬進度條 + 重置藥丸 + 燒速率/建議切換提示框
+function renderLarge(widget, p, etaMin, payloads) {
   widget.backgroundColor = CARD_BG;
   widget.setPadding(16, 16, 14, 16);
   const cc = p && p.claude_code;
@@ -622,6 +646,24 @@ function renderLarge(widget, p, etaMin) {
     bt.font = Font.boldSystemFont(11);
     bt.textColor = ORANGE;
     bt.lineLimit = 1;
+  } else if (!stale && p5 != null && p5 >= 90) {
+    // 已達上限：改顯示「建議切換」提示框（青色）
+    const hints = switchHints(p, payloads, 2);
+    if (hints.length) {
+      widget.addSpacer(12);
+      const box = widget.addStack();
+      box.backgroundColor = new Color("#3cc5ae", 0.14);
+      box.cornerRadius = 10;
+      box.setPadding(8, 10, 8, 10);
+      box.centerAlignContent();
+      const dotT = box.addText("→ ");
+      dotT.font = Font.boldSystemFont(11);
+      dotT.textColor = TEAL;
+      const bt = box.addText("改用 " + hints.map(h => h.name + " " + Math.round(h.p5) + "%").join(" · "));
+      bt.font = Font.boldSystemFont(11);
+      bt.textColor = TEAL;
+      bt.lineLimit = 1;
+    }
   }
 
   widget.addSpacer();
@@ -666,11 +708,11 @@ async function run() {
   } else if (family === "accessoryInline") {
     renderInline(widget, payload, etaMin);
   } else if (family === "small") {
-    renderSmall(widget, payload, etaMin);
+    renderSmall(widget, payload, etaMin, payloads);
   } else if (family === "medium") {
-    renderMedium(widget, payload, etaMin);
+    renderMedium(widget, payload, etaMin, payloads);
   } else if (family === "large" || family === "extraLarge") {
-    renderLarge(widget, payload, etaMin);
+    renderLarge(widget, payload, etaMin, payloads);
   } else {
     renderNoData(widget, "請使用鎖屏、small / medium / large widget");
   }
