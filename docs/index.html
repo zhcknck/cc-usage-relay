@@ -15,12 +15,13 @@
     --bg: #0d0d0f;
     --card: #1c1c1e;
     --track: #3a3a3c;
+    --pill: #2c2c2e;
     --text: #f2f2f7;
     --muted: #98989f;
-    --green: #30d158;
-    --orange: #ff9f0a;
+    --orange: #ff9c33;
+    --teal: #3cc5ae;
     --red: #ff453a;
-    --weekly: #6e8cae;
+    --weekly: #3cc5ae;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -28,7 +29,7 @@
     color: var(--text);
     font-family: -apple-system, "SF Pro Text", "PingFang TC", "Microsoft JhengHei", sans-serif;
     min-height: 100vh;
-    padding: max(16px, env(safe-area-inset-top)) 16px 32px;
+    padding: max(16px, env(safe-area-inset-top)) 16px 36px;
     transition: filter .4s;
   }
   body.stale { filter: saturate(.25); }
@@ -37,61 +38,70 @@
     align-items: baseline;
     justify-content: space-between;
     max-width: 560px;
-    margin: 0 auto 18px;
+    margin: 0 auto 16px;
   }
   header h1 { font-size: 18px; font-weight: 700; }
   #meta { font-size: 12px; color: var(--muted); }
   #meta .stale-flag { color: var(--red); font-weight: 700; margin-left: 6px; }
-  .machine { max-width: 560px; margin: 0 auto 14px; }
-  .machine h2 {
-    font-size: 13px;
-    color: var(--muted);
-    font-weight: 600;
-    letter-spacing: .06em;
-    text-transform: uppercase;
-    margin-bottom: 8px;
-    display: flex;
-    justify-content: space-between;
-  }
-  .machine h2 .mstale { color: var(--red); font-size: 11px; }
+  .machine { max-width: 560px; margin: 0 auto 12px; }
   .card {
     background: var(--card);
-    border-radius: 16px;
-    padding: 16px;
-    margin-bottom: 10px;
+    border-radius: 18px;
+    padding: 16px 18px;
+    border: 1.5px solid transparent;
   }
-  .card .top {
+  .card.active { border-color: rgba(255,156,51,.55); }
+  .chead {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: 14px;
   }
-  .card .name { font-size: 14px; font-weight: 600; }
-  .card .big { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .row { margin-top: 10px; }
+  .ctitle { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .ctitle .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--orange); display: inline-block;
+  }
+  .ctitle.stale .dot { background: var(--muted); }
+  .ctitle .badge {
+    font-size: 10px; font-weight: 700; color: var(--orange);
+    background: rgba(255,156,51,.16); border-radius: 6px;
+    padding: 1px 6px; margin-left: 2px;
+  }
+  .csub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .big { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+  .row { margin-top: 11px; }
   .row .label {
     display: flex;
     justify-content: space-between;
     font-size: 12px;
     color: var(--muted);
-    margin-bottom: 4px;
+    margin-bottom: 5px;
   }
+  .row .label b { font-weight: 700; }
   .bar {
-    height: 6px;
-    border-radius: 3px;
+    height: 7px;
+    border-radius: 4px;
     background: var(--track);
     overflow: hidden;
   }
-  .bar > div { height: 100%; border-radius: 3px; transition: width .5s; }
-  .resets, .extra {
-    margin-top: 12px;
-    font-size: 12px;
-    color: var(--muted);
+  .bar > div { height: 100%; border-radius: 4px; transition: width .5s; }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .pill {
+    background: var(--pill); border-radius: 9px;
+    padding: 5px 10px; font-size: 12px; color: var(--muted);
   }
-  .burn { margin-top: 8px; font-size: 12px; font-weight: 600; }
-  .burn.hot { color: var(--orange); }
+  .pill b { color: var(--text); font-weight: 700; }
+  .extra { margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .burn { margin-top: 11px; font-size: 12.5px; font-weight: 600; }
+  .burn.hot {
+    color: var(--orange);
+    background: rgba(255,156,51,.13);
+    border-radius: 10px;
+    padding: 9px 11px;
+  }
   .burn.cool { color: var(--muted); font-weight: 400; }
-  .chart-wrap { margin-top: 14px; }
+  .chart-wrap { margin-top: 16px; }
   .chart-wrap .label {
     font-size: 11px;
     color: var(--muted);
@@ -108,8 +118,8 @@
     margin-right: 4px;
     vertical-align: middle;
   }
-  .chart-wrap .label .k5::before { background: var(--green); }
-  .chart-wrap .label .k7::before { background: var(--weekly); }
+  .chart-wrap .label .k5::before { background: var(--orange); }
+  .chart-wrap .label .k7::before { background: var(--teal); }
   svg.chart { width: 100%; height: 84px; display: block; }
   #empty {
     max-width: 560px;
@@ -141,8 +151,13 @@ const HISTORY_RAW_URL = GIST_RAW_URL.replace(/usage\.json$/, "history.json");
 function toneVar(pct) {
   if (pct == null) return "var(--muted)";
   if (pct >= 90) return "var(--red)";
-  if (pct >= 70) return "var(--orange)";
-  return "var(--green)";
+  return "var(--orange)";   // 橘色主題：未爆統一橘、滿 90 轉紅
+}
+
+function shortName(machine) {
+  const m = String(machine || "");
+  const i = m.indexOf("·");
+  return i >= 0 ? m.slice(i + 1) : (m || "未知");
 }
 
 function esc(s) {
@@ -181,7 +196,7 @@ function barRow(label, pct, color) {
   const width = Math.min(100, pct == null ? 0 : pct);
   return `
     <div class="row">
-      <div class="label"><span>${label}</span><span>${pct == null ? "--" : Math.round(pct)}%</span></div>
+      <div class="label"><span>${label}</span><b style="color:${color}">${pct == null ? "--" : Math.round(pct)}%</b></div>
       <div class="bar"><div style="width:${width}%;background:${color}"></div></div>
     </div>`;
 }
@@ -220,8 +235,8 @@ function chartSvg(points) {
   return `
     <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       ${grid(70, "2 4")}${grid(90, "2 4")}
-      ${p7 ? `<path d="${p7}" fill="none" stroke="var(--weekly)" stroke-width="1.5" opacity=".7"/>` : ""}
-      ${p5 ? `<path d="${p5}" fill="none" stroke="var(--green)" stroke-width="2"/>` : ""}
+      ${p7 ? `<path d="${p7}" fill="none" stroke="var(--teal)" stroke-width="1.5" opacity=".75"/>` : ""}
+      ${p5 ? `<path d="${p5}" fill="none" stroke="var(--orange)" stroke-width="2"/>` : ""}
     </svg>`;
 }
 
@@ -296,21 +311,33 @@ function renderPayload(p, history) {
     .filter(e => isFinite(e.t))
     .sort((a, b) => a.t - b.t);
 
+  const active = p.active === true && !stale;
+  const sub = stale
+    ? "資料過期 " + hhmm(p.updated_at) + (p.stale_reason ? " · " + esc(p.stale_reason) : "")
+    : (p5 != null && p5 >= 99.5 ? "5hr 已達上限 · 等待重置" : "5hr 額度 · 進行中");
+
   let card = `
-    <div class="card">
-      <div class="top">
-        <span class="name">Claude Code</span>
+    <div class="card${active ? " active" : ""}">
+      <div class="chead">
+        <div>
+          <div class="ctitle${stale ? " stale" : ""}">
+            <span class="dot"></span>${esc(shortName(p.machine))}${active ? '<span class="badge">使用中</span>' : ""}
+          </div>
+          <div class="csub">${sub}</div>
+        </div>
         <span class="big" style="color:${toneVar(p5)}">${p5 == null ? "--" : Math.round(p5)}%</span>
       </div>
       ${barRow("5hr", p5, toneVar(p5))}
-      ${barRow("Weekly", p7, "var(--weekly)")}`;
+      ${barRow("Weekly", p7, "var(--teal)")}`;
   for (const [key, label] of [["seven_day_opus", "Weekly · Opus"], ["seven_day_sonnet", "Weekly · Sonnet"]]) {
     const pct = pctOf(cc[key]);
-    if (pct != null) card += barRow(label, pct, "var(--weekly)");
+    if (pct != null) card += barRow(label, pct, "var(--teal)");
   }
   card += `
-      <div class="resets">5hr 重置於 ${relTime(cc.five_hour && cc.five_hour.resets_at)} ·
-        7日 重置於 ${relTime(cc.seven_day && cc.seven_day.resets_at)}</div>
+      <div class="pills">
+        <span class="pill">5hr 重置 <b>${relTime(cc.five_hour && cc.five_hour.resets_at)}</b></span>
+        <span class="pill">7日 重置 <b>${relTime(cc.seven_day && cc.seven_day.resets_at)}</b></span>
+      </div>
       ${stale ? "" : burnLine(points, p5, cc.five_hour && cc.five_hour.resets_at)}
       ${stale ? "" : weeklyForecast(points, p7, cc.seven_day && cc.seven_day.resets_at)}
       ${extraLine(p)}`;
@@ -324,12 +351,7 @@ function renderPayload(p, history) {
   }
   card += `</div>`;
 
-  return `
-    <section class="machine">
-      <h2><span>${esc(p.machine || "未知機器")}</span>${stale ? '<span class="mstale">過期 ' + hhmm(p.updated_at) +
-        (p.stale_reason ? " · " + esc(p.stale_reason) : "") + "</span>" : ""}</h2>
-      ${card}
-    </section>`;
+  return `<section class="machine">${card}</section>`;
 }
 
 async function fetchJson(url) {
@@ -368,7 +390,10 @@ async function refresh() {
   }
   empty.hidden = true;
 
-  payloads.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+  // 排序：使用中優先，其次 5hr% 高的（用最兇的）在前
+  const p5v = (p) => { const v = p.claude_code && p.claude_code.five_hour && p.claude_code.five_hour.pct; return typeof v === "number" ? v : -1; };
+  payloads.sort((a, b) =>
+    (b.active === true) - (a.active === true) || p5v(b) - p5v(a));
   content.innerHTML = payloads.map(p => renderPayload(p, history)).join("");
 
   const stale = payloads.every(isStale);
