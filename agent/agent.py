@@ -871,7 +871,15 @@ def maybe_daily_summary(cfg, state, history, own_labels):
         return
     if not has_channels(cfg):
         return
-    lines = []
+
+    def acc_name(label):  # 去掉「機器名·」前綴，只留帳號名
+        i = label.find("·")
+        return label[i + 1:] if i >= 0 else label
+
+    def dot(pct):  # 依週額度的紅綠燈
+        return "🔴" if pct >= 90 else ("🟡" if pct >= 70 else "🟢")
+
+    rows = []
     for label in sorted(own_labels):
         pts = [e for e in history
                if isinstance(e, dict) and e.get("m") == label
@@ -880,11 +888,15 @@ def maybe_daily_summary(cfg, state, history, own_labels):
         d7s = [e["d7"] for e in pts if isinstance(e.get("d7"), (int, float))]
         if not h5s and not d7s:
             continue
-        lines.append("%s：5hr 峰值 %d%%，週額度現為 %d%%" % (
-            label, max(h5s) if h5s else 0, d7s[-1] if d7s else 0))
-    if not lines:
+        peak5 = max(h5s) if h5s else 0
+        wk = d7s[-1] if d7s else 0
+        rows.append((wk, "%s %s ── 5hr 峰值 %d%% ・ 週 %d%%" % (
+            dot(wk), acc_name(label), peak5, wk)))
+    if not rows:
         return
-    if notify_all(cfg, "📊 Claude Code 今日用量摘要", "\n".join(lines), COLOR_GREEN):
+    rows.sort(key=lambda r: -r[0])  # 用最兇（週額度高）的排最前
+    title = "📊 今日用量摘要（%s）" % now.strftime("%m/%d")
+    if notify_all(cfg, title, "\n".join(r[1] for r in rows), COLOR_GREEN):
         state["summary_date"] = today
         log.info("已發送每日摘要")
 
