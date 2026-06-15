@@ -258,39 +258,36 @@ function chartStart(points) {
 }
 
 function chartSvg(points) {
-  // 週額度 d7 直條圖：近 24h 切成 N 段，每條高度 = 該時段的週額度%（緩升 → 遞增柱狀）。
+  // 5hr 用量走勢（橘線）：0–100 全幅。爬升=有在用、歸零=該視窗重置。
+  // 每 5 小時的重置斷崖（驟降 >10%）或資料空窗（>20 分鐘）就斷線，不硬連成垂直線。
   const W = 320, H = 96, PAD = 6;
   const now = Date.now();
   const t0 = chartStart(points);
   const span = Math.max(now - t0, 60000);
-  const pts = points.filter(p => typeof p.d7 === "number" && p.t >= t0).sort((a, b) => a.t - b.t);
+  const x = (t) => PAD + ((t - t0) / span) * (W - PAD * 2);
+  const y = (pct) => H - PAD - (Math.min(100, Math.max(0, pct)) / 100) * (H - PAD * 2);
+  const pts = points.filter(p => typeof p.h5 === "number" && p.t >= t0).sort((a, b) => a.t - b.t);
   if (pts.length < 2) return "";
-  const N = 16, bw = span / N;
-  const innerH = H - PAD * 2, slot = (W - PAD * 2) / N, gap = slot * 0.3, barW = slot - gap;
-  // 每段取該時段最後一筆值；該段沒資料就沿用前值（關機空窗期間週額度不變）
-  const bars = []; let last = pts[0].d7, pi = 0;
-  for (let i = 0; i < N; i++) {
-    const end = t0 + (i + 1) * bw; let v = null;
-    while (pi < pts.length && pts[pi].t <= end) { v = pts[pi].d7; pi++; }
-    if (v != null) last = v;
-    bars.push(last);
+  const segs = []; let cur = [], prev = null;
+  for (const p of pts) {
+    if (prev && (p.t - prev.t > 20 * 60 * 1000 || prev.h5 - p.h5 > 10) && cur.length) {
+      segs.push(cur); cur = [];
+    }
+    cur.push(p); prev = p;
   }
-  // 自動縮放：最高一條約佔 9 成高度，低用量時也看得出遞增趨勢（絕對 % 看上方進度條）
-  const maxV = Math.max(1, ...bars.map(v => Math.min(100, Math.max(0, v))));
-  const rects = bars.map((v, i) => {
-    const h = Math.max(2, Math.min(100, Math.max(0, v)) / maxV * innerH * 0.92);
-    const x = PAD + i * slot + gap / 2;
-    return `<rect x="${x.toFixed(1)}" y="${(H - PAD - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="url(#barg)"/>`;
-  }).join("");
+  if (cur.length) segs.push(cur);
+  const valid = segs.filter(s => s.length >= 2);
+  if (!valid.length) return "";
+  const path = valid.map(s =>
+    "M" + s.map(p => x(p.t).toFixed(1) + " " + y(p.h5).toFixed(1)).join(" L")).join(" ");
+  const grid = (pct) =>
+    `<line x1="${PAD}" y1="${y(pct).toFixed(1)}" x2="${W - PAD}" y2="${y(pct).toFixed(1)}"
+       stroke="rgba(255,255,255,.08)" stroke-width="1" stroke-dasharray="1 6" vector-effect="non-scaling-stroke"/>`;
   return `
     <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="barg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="var(--teal)" stop-opacity="1"/>
-          <stop offset="1" stop-color="var(--teal)" stop-opacity=".5"/>
-        </linearGradient>
-      </defs>
-      ${rects}
+      ${grid(50)}${grid(90)}
+      <path d="${path}" fill="none" stroke="var(--orange)" stroke-width="3"
+        stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
     </svg>`;
 }
 
@@ -460,7 +457,7 @@ function renderPayload(p, history, idx) {
     const chartHrs = Math.max(1, Math.round((Date.now() - chartStart(points)) / 3600000));
     card += `
       <div class="chart-wrap">
-        <div class="label"><span class="k7">週額度走勢</span><span class="spacer">近 ${chartHrs}h</span></div>
+        <div class="label"><span class="k5">5hr 用量走勢</span><span class="spacer">近 ${chartHrs}h</span></div>
         ${chartSvg(points)}
         ${chartAxis(points)}
       </div>`;
