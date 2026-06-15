@@ -92,20 +92,26 @@
   }
   .csub { font-size: 12px; color: var(--muted); margin-top: 5px; }
 
-  /* 圓環 gauge：5hr 用量主角 */
+  /* 主角：5hr 大數字 + 週額度圓環 */
+  .hero { display: flex; align-items: center; gap: 16px; flex: none; }
+  .big-wrap { text-align: center; line-height: 1; }
+  .big { font-size: 38px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .big i { font-size: 18px; font-weight: 700; font-style: normal; color: var(--muted); margin-left: 2px; }
+  .big-cap { display: block; font-size: 10px; color: var(--muted); margin-top: 6px; letter-spacing: .1em; }
+  /* 圓環 gauge：週額度 */
   .ring {
-    width: 92px; height: 92px; border-radius: 50%; flex: none;
+    width: 72px; height: 72px; border-radius: 50%; flex: none;
     display: grid; place-items: center; position: relative;
     background: conic-gradient(var(--rc) calc(var(--pct) * 1%), var(--track) 0);
   }
   .ring::after {
-    content: ""; position: absolute; inset: 7px; border-radius: 50%;
+    content: ""; position: absolute; inset: 6px; border-radius: 50%;
     background: linear-gradient(180deg, var(--card2), var(--card));
   }
-  .ring-in { position: relative; text-align: center; line-height: 1; }
-  .ring-val { font-size: 27px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .ring-val i { font-size: 14px; font-weight: 700; font-style: normal; color: var(--muted); margin-left: 1px; }
-  .ring-cap { display: block; font-size: 10px; color: var(--muted); margin-top: 4px; letter-spacing: .1em; }
+  .ring-in { position: relative; z-index: 1; text-align: center; line-height: 1; }
+  .ring-val { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .ring-val i { font-size: 11px; font-weight: 700; font-style: normal; color: var(--muted); margin-left: 1px; }
+  .ring-cap { display: block; font-size: 9px; color: var(--muted); margin-top: 3px; letter-spacing: .1em; }
 
   .bars { margin-top: 18px; display: grid; gap: 13px; }
   .row .label {
@@ -150,7 +156,7 @@
   .chart-wrap .label .k5::before { background: var(--orange); }
   .chart-wrap .label .k7::before { background: var(--teal); }
   .chart-wrap .label .spacer { margin-left: auto; }
-  svg.chart { width: 100%; height: 88px; display: block; }
+  svg.chart { width: 100%; height: 96px; display: block; }
   #empty {
     max-width: 560px; margin: 60px auto; text-align: center;
     color: var(--muted); font-size: 14px; line-height: 1.6;
@@ -237,33 +243,52 @@ function chartStart(points) {
 
 function chartSvg(points) {
   // points: [{t: ms, h5, d7}] 已按時間排序
-  const W = 320, H = 88, PAD = 4;
+  const W = 320, H = 96, PAD = 6;
   const now = Date.now();
   const t0 = chartStart(points);
   const span = Math.max(now - t0, 60000);
   const x = (t) => PAD + ((t - t0) / span) * (W - PAD * 2);
   const y = (pct) => H - PAD - (Math.min(100, Math.max(0, pct)) / 100) * (H - PAD * 2);
-  const line = (key) => {
+  // 切成連續線段：重置斷崖（驟降 >10%）或資料空窗（>20 分鐘）就斷開，不硬連
+  const segments = (key) => {
     const pts = points.filter(p => typeof p[key] === "number" && p.t >= t0);
-    if (pts.length < 2) return "";
-    // 重置斷崖（驟降 >10%）或資料空窗（>20 分鐘）→ 斷線重新起筆，不硬連
-    let d = "", prev = null;
+    const segs = []; let cur = [], prev = null;
     for (const p of pts) {
-      const brk = !prev || p.t - prev.t > 20 * 60 * 1000 || prev[key] - p[key] > 10;
-      d += (brk ? "M" : "L") + x(p.t).toFixed(1) + " " + y(p[key]).toFixed(1) + " ";
-      prev = p;
+      if (prev && (p.t - prev.t > 20 * 60 * 1000 || prev[key] - p[key] > 10) && cur.length) {
+        segs.push(cur); cur = [];
+      }
+      cur.push(p); prev = p;
     }
-    return d.trim();
+    if (cur.length) segs.push(cur);
+    return segs.filter(s => s.length >= 2);
   };
+  const linePath = (segs, key) => segs.map(s =>
+    "M" + s.map(p => x(p.t).toFixed(1) + " " + y(p[key]).toFixed(1)).join(" L")).join(" ");
+  const areaPath = (segs, key) => segs.map(s =>
+    "M" + x(s[0].t).toFixed(1) + " " + (H - PAD).toFixed(1) +
+    " L" + s.map(p => x(p.t).toFixed(1) + " " + y(p[key]).toFixed(1)).join(" L") +
+    " L" + x(s[s.length - 1].t).toFixed(1) + " " + (H - PAD).toFixed(1) + " Z").join(" ");
   const grid = (pct, dash) =>
     `<line x1="${PAD}" y1="${y(pct)}" x2="${W - PAD}" y2="${y(pct)}"
-       stroke="#3a3a3c" stroke-width="1" stroke-dasharray="${dash}"/>`;
-  const p5 = line("h5"), p7 = line("d7");
+       stroke="rgba(255,255,255,.09)" stroke-width="1" stroke-dasharray="${dash}" vector-effect="non-scaling-stroke"/>`;
+  const s5 = segments("h5"), s7 = segments("d7");
+  const p5 = linePath(s5, "h5"), p7 = linePath(s7, "d7");
+  const a5 = areaPath(s5, "h5");
+  // vector-effect=non-scaling-stroke：SVG 被橫向拉伸時線寬仍維持一致，不會被壓扁
   return `
     <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      ${grid(70, "2 4")}${grid(90, "2 4")}
-      ${p7 ? `<path d="${p7}" fill="none" stroke="var(--teal)" stroke-width="1.5" opacity=".75"/>` : ""}
-      ${p5 ? `<path d="${p5}" fill="none" stroke="var(--orange)" stroke-width="2"/>` : ""}
+      <defs>
+        <linearGradient id="fill5" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="var(--orange)" stop-opacity=".30"/>
+          <stop offset="1" stop-color="var(--orange)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${grid(70, "1 6")}${grid(90, "1 6")}
+      ${a5 ? `<path d="${a5}" fill="url(#fill5)" stroke="none"/>` : ""}
+      ${p7 ? `<path d="${p7}" fill="none" stroke="var(--teal)" stroke-width="2.4"
+        stroke-linejoin="round" stroke-linecap="round" opacity=".85" vector-effect="non-scaling-stroke"/>` : ""}
+      ${p5 ? `<path d="${p5}" fill="none" stroke="var(--orange)" stroke-width="3"
+        stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>` : ""}
     </svg>`;
 }
 
@@ -343,7 +368,7 @@ function renderPayload(p, history) {
     ? "資料過期 " + hhmm(p.updated_at) + (p.stale_reason ? " · " + esc(p.stale_reason) : "")
     : (p5 != null && p5 >= 99.5 ? "5hr 已達上限 · 等待重置" : "5hr 額度 · 進行中");
 
-  const ringPct = p5 == null ? 0 : Math.max(0, Math.min(100, Math.round(p5)));
+  const wkPct = p7 == null ? 0 : Math.max(0, Math.min(100, Math.round(p7)));
   let card = `
     <div class="card${active ? " active" : ""}">
       <div class="chead">
@@ -353,15 +378,21 @@ function renderPayload(p, history) {
           </div>
           <div class="csub">${sub}</div>
         </div>
-        <div class="ring" style="--pct:${ringPct};--rc:${toneVar(p5)}">
-          <div class="ring-in">
-            <div class="ring-val">${p5 == null ? "--" : Math.round(p5)}<i>%</i></div>
-            <div class="ring-cap">5HR</div>
+        <div class="hero">
+          <div class="ring" style="--pct:${wkPct};--rc:var(--teal)">
+            <div class="ring-in">
+              <div class="ring-val">${p7 == null ? "--" : Math.round(p7)}<i>%</i></div>
+              <div class="ring-cap">WK</div>
+            </div>
+          </div>
+          <div class="big-wrap">
+            <span class="big" style="color:${toneVar(p5)}">${p5 == null ? "--" : Math.round(p5)}<i>%</i></span>
+            <span class="big-cap">5HR</span>
           </div>
         </div>
       </div>
       <div class="bars">
-        ${barRow("Weekly", p7, "var(--teal)")}`;
+        ${barRow("5hr", p5, toneVar(p5))}`;
   for (const [key, label] of [["seven_day_opus", "Weekly · Opus"], ["seven_day_sonnet", "Weekly · Sonnet"]]) {
     const pct = pctOf(cc[key]);
     if (pct != null) card += barRow(label, pct, "var(--teal)");
