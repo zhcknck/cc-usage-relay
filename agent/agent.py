@@ -994,10 +994,27 @@ def run_once(cfg, state, trigger):
         fresh.append((st, payload))
         own_entries.append(payload)
 
-    # 標記「正在用的」帳號：本機當前登入 uuid 對上哪張卡就標 active=true
+    # 標記「正在用的」帳號（混合判定，可同時點亮多個並行使用的帳號）：
+    #   ① 本機當前登入帳號（~/.claude credentials 檔）對上 uuid 者
+    #   ② 5hr% 比上一輪有增加 → 正在燒額度（credentials 檔一次只存一個帳號，
+    #      光靠 ① 偵測不到同時用的其他帳號，故補用量上升訊號）
     active_uuid = current_active_uuid(cfg, state)
+
+    def p5_of(pl):
+        v = ((pl or {}).get("claude_code") or {}).get("five_hour")
+        v = v.get("pct") if isinstance(v, dict) else None
+        return v if isinstance(v, (int, float)) else None
+
+    recently_used = set()
+    for st, payload in fresh:
+        cur5, prev5 = p5_of(payload), p5_of(st.get("last_payload"))
+        if cur5 is not None and prev5 is not None and cur5 - prev5 >= 1:
+            recently_used.add(payload.get("machine"))
+
     for entry in own_entries:
-        entry["active"] = bool(active_uuid and acc_uuids.get(entry.get("machine")) == active_uuid)
+        label = entry.get("machine")
+        by_uuid = bool(active_uuid and acc_uuids.get(label) == active_uuid)
+        entry["active"] = (by_uuid or label in recently_used) and not entry.get("stale")
 
     existing, history = fetch_gist_files(cfg)
     merged = merge_machines(existing, own_entries, float(cfg["machine_ttl_hours"]))
