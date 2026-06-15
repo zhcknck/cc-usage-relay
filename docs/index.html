@@ -95,26 +95,10 @@
   }
   .csub { font-size: 12px; color: var(--muted); margin-top: 5px; }
 
-  /* 主角：5hr 大數字 + 週額度圓環 */
-  .hero { display: flex; align-items: center; gap: 16px; flex: none; }
-  .big-wrap { text-align: center; line-height: 1; }
-  .big { font-size: 38px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .big i { font-size: 18px; font-weight: 700; font-style: normal; color: var(--muted); margin-left: 2px; }
-  .big-cap { display: block; font-size: 10px; color: var(--muted); margin-top: 6px; letter-spacing: .1em; }
-  /* 圓環 gauge：週額度 */
-  .ring {
-    width: 72px; height: 72px; border-radius: 50%; flex: none;
-    display: grid; place-items: center; position: relative;
-    background: conic-gradient(var(--rc) calc(var(--pct) * 1%), var(--track) 0);
-  }
-  .ring::after {
-    content: ""; position: absolute; inset: 6px; border-radius: 50%;
-    background: linear-gradient(180deg, var(--card2), var(--card));
-  }
-  .ring-in { position: relative; z-index: 1; text-align: center; line-height: 1; }
-  .ring-val { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .ring-val i { font-size: 11px; font-weight: 700; font-style: normal; color: var(--muted); margin-left: 1px; }
-  .ring-cap { display: block; font-size: 9px; color: var(--muted); margin-top: 3px; letter-spacing: .1em; }
+  /* 主角：5hr 剩餘「水位球」（滿水=100，用越多水位越低）*/
+  .ball-wrap { flex: none; text-align: center; line-height: 1; }
+  .ball { width: 80px; height: 80px; display: block; }
+  .ball-cap { display: block; font-size: 10px; color: var(--muted); margin-top: 6px; letter-spacing: .06em; }
 
   .bars { margin-top: 18px; display: grid; gap: 13px; }
   .row .label {
@@ -245,50 +229,45 @@ function chartStart(points) {
 }
 
 function chartSvg(points) {
-  // points: [{t: ms, h5, d7}] 已按時間排序
-  // 只畫「週額度 d7」：它只緩慢爬升、每週才重置，線乾淨且能看出「這週會不會爆」。
-  // 5hr 每 5 小時歸零一次是鋸齒狀，畫成走勢圖只會雜亂，故不畫（當前值已用大數字／圓環／燒速率呈現）。
+  // points: [{t: ms, h5, d7}] 已按時間排序。畫 5hr（橘）+ 週額度（青）兩條線，皆加粗。
   const W = 320, H = 96, PAD = 6;
   const now = Date.now();
   const t0 = chartStart(points);
   const span = Math.max(now - t0, 60000);
   const x = (t) => PAD + ((t - t0) / span) * (W - PAD * 2);
   const y = (pct) => H - PAD - (Math.min(100, Math.max(0, pct)) / 100) * (H - PAD * 2);
-
-  const pts = points.filter(p => typeof p.d7 === "number" && p.t >= t0);
-  if (pts.length < 2) return "";
-  // 只在週重置斷崖（驟降 >10%）斷線；時間空窗不斷（週額度在空窗期間不變，連起來反而乾淨）
-  const segs = []; let cur = [], prev = null;
-  for (const p of pts) {
-    if (prev && prev.d7 - p.d7 > 10 && cur.length) { segs.push(cur); cur = []; }
-    cur.push(p); prev = p;
-  }
-  if (cur.length) segs.push(cur);
-  const valid = segs.filter(s => s.length >= 2);
-  if (!valid.length) return "";
-
-  const linePath = valid.map(s =>
-    "M" + s.map(p => x(p.t).toFixed(1) + " " + y(p.d7).toFixed(1)).join(" L")).join(" ");
-  const areaPath = valid.map(s =>
+  // 切段：重置斷崖（驟降 >10%）或資料空窗（>20 分鐘）就斷開，不硬連成垂直線
+  const segments = (key) => {
+    const pts = points.filter(p => typeof p[key] === "number" && p.t >= t0);
+    const segs = []; let cur = [], prev = null;
+    for (const p of pts) {
+      if (prev && (p.t - prev.t > 20 * 60 * 1000 || prev[key] - p[key] > 10) && cur.length) {
+        segs.push(cur); cur = [];
+      }
+      cur.push(p); prev = p;
+    }
+    if (cur.length) segs.push(cur);
+    return segs.filter(s => s.length >= 2);
+  };
+  const linePath = (segs, key) => segs.map(s =>
+    "M" + s.map(p => x(p.t).toFixed(1) + " " + y(p[key]).toFixed(1)).join(" L")).join(" ");
+  const areaPath = (segs, key) => segs.map(s =>
     "M" + x(s[0].t).toFixed(1) + " " + (H - PAD).toFixed(1) +
-    " L" + s.map(p => x(p.t).toFixed(1) + " " + y(p.d7).toFixed(1)).join(" L") +
+    " L" + s.map(p => x(p.t).toFixed(1) + " " + y(p[key]).toFixed(1)).join(" L") +
     " L" + x(s[s.length - 1].t).toFixed(1) + " " + (H - PAD).toFixed(1) + " Z").join(" ");
   const grid = (pct) =>
     `<line x1="${PAD}" y1="${y(pct)}" x2="${W - PAD}" y2="${y(pct)}"
        stroke="rgba(255,255,255,.08)" stroke-width="1" stroke-dasharray="1 6" vector-effect="non-scaling-stroke"/>`;
+  const s5 = segments("h5"), s7 = segments("d7");
+  const p5 = linePath(s5, "h5"), p7 = linePath(s7, "d7");
   // vector-effect=non-scaling-stroke：SVG 被橫向拉伸時線寬仍維持一致，不會被壓扁
   return `
     <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="fillwk" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="var(--teal)" stop-opacity=".34"/>
-          <stop offset="1" stop-color="var(--teal)" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
       ${grid(50)}${grid(90)}
-      <path d="${areaPath}" fill="url(#fillwk)" stroke="none"/>
-      <path d="${linePath}" fill="none" stroke="var(--teal)" stroke-width="3"
-        stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      ${p7 ? `<path d="${p7}" fill="none" stroke="var(--teal)" stroke-width="3"
+        stroke-linejoin="round" stroke-linecap="round" opacity=".9" vector-effect="non-scaling-stroke"/>` : ""}
+      ${p5 ? `<path d="${p5}" fill="none" stroke="var(--orange)" stroke-width="3"
+        stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>` : ""}
     </svg>`;
 }
 
@@ -350,7 +329,36 @@ function extraLine(p) {
   return `<div class="extra">Extra usage — ${parts.join(" · ")}</div>`;
 }
 
-function renderPayload(p, history) {
+// 5hr 剩餘水位球：滿水=100（沒用），5hr 用越多水位越低，中央顯示剩餘數字。
+// idx 用來產生唯一的 clipPath / gradient id（多張卡片各自獨立）。
+function waterBall(p5, idx) {
+  const used = p5 == null ? 0 : Math.max(0, Math.min(100, p5));
+  const surfaceY = used;                 // y=0 滿水、y=100 空
+  const remaining = p5 == null ? "--" : Math.round(100 - used);
+  const danger = (100 - used) <= 10;     // 剩 <=10% 轉紅
+  const water = danger ? "var(--red)" : "var(--orange)";
+  const cid = "wc" + idx, gid = "wg" + idx;
+  return `
+    <svg class="ball" viewBox="0 0 100 100">
+      <defs>
+        <clipPath id="${cid}"><circle cx="50" cy="50" r="45"/></clipPath>
+        <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="${water}" stop-opacity=".92"/>
+          <stop offset="1" stop-color="${water}" stop-opacity=".5"/>
+        </linearGradient>
+      </defs>
+      <circle cx="50" cy="50" r="45" fill="rgba(255,255,255,.04)"/>
+      <g clip-path="url(#${cid})">
+        <rect x="0" y="${surfaceY.toFixed(1)}" width="100" height="${(100 - surfaceY).toFixed(1)}" fill="url(#${gid})"/>
+        <ellipse cx="50" cy="${surfaceY.toFixed(1)}" rx="52" ry="2.5" fill="${water}" opacity=".85"/>
+      </g>
+      <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="2.5"/>
+      <text x="50" y="50" text-anchor="middle" dominant-baseline="central"
+        font-size="28" font-weight="800" fill="#fff">${remaining}</text>
+    </svg>`;
+}
+
+function renderPayload(p, history, idx) {
   const cc = p.claude_code;
   if (!cc) return "";
   const p5 = pctOf(cc.five_hour);
@@ -368,7 +376,6 @@ function renderPayload(p, history) {
     ? "資料過期 " + hhmm(p.updated_at) + (p.stale_reason ? " · " + esc(p.stale_reason) : "")
     : (p5 != null && p5 >= 99.5 ? "5hr 已達上限 · 等待重置" : "5hr 額度 · 進行中");
 
-  const wkPct = p7 == null ? 0 : Math.max(0, Math.min(100, Math.round(p7)));
   let card = `
     <div class="card${active ? " active" : ""}">
       <div class="chead">
@@ -378,21 +385,14 @@ function renderPayload(p, history) {
           </div>
           <div class="csub">${sub}</div>
         </div>
-        <div class="hero">
-          <div class="ring" style="--pct:${wkPct};--rc:var(--teal)">
-            <div class="ring-in">
-              <div class="ring-val">${p7 == null ? "--" : Math.round(p7)}<i>%</i></div>
-              <div class="ring-cap">WK</div>
-            </div>
-          </div>
-          <div class="big-wrap">
-            <span class="big" style="color:${toneVar(p5)}">${p5 == null ? "--" : Math.round(p5)}<i>%</i></span>
-            <span class="big-cap">5HR</span>
-          </div>
+        <div class="ball-wrap">
+          ${waterBall(p5, idx)}
+          <span class="ball-cap">5hr 剩餘</span>
         </div>
       </div>
       <div class="bars">
-        ${barRow("5hr", p5, toneVar(p5))}`;
+        ${barRow("5hr", p5, toneVar(p5))}
+        ${barRow("Weekly", p7, "var(--teal)")}`;
   for (const [key, label] of [["seven_day_opus", "Weekly · Opus"], ["seven_day_sonnet", "Weekly · Sonnet"]]) {
     const pct = pctOf(cc[key]);
     if (pct != null) card += barRow(label, pct, "var(--teal)");
@@ -410,7 +410,7 @@ function renderPayload(p, history) {
     const chartHrs = Math.max(1, Math.round((Date.now() - chartStart(points)) / 3600000));
     card += `
       <div class="chart-wrap">
-        <div class="label"><span class="k7">週額度走勢</span><span class="spacer">近 ${chartHrs}h</span></div>
+        <div class="label"><span class="k5">5hr</span><span class="k7">週額度</span><span class="spacer">近 ${chartHrs}h</span></div>
         ${chartSvg(points)}
       </div>`;
   }
@@ -459,7 +459,7 @@ async function refresh() {
   const p5v = (p) => { const v = p.claude_code && p.claude_code.five_hour && p.claude_code.five_hour.pct; return typeof v === "number" ? v : -1; };
   payloads.sort((a, b) =>
     (b.active === true) - (a.active === true) || p5v(b) - p5v(a));
-  content.innerHTML = payloads.map(p => renderPayload(p, history)).join("");
+  content.innerHTML = payloads.map((p, i) => renderPayload(p, history, i)).join("");
 
   const stale = payloads.every(isStale);
   document.body.classList.toggle("stale", stale);
