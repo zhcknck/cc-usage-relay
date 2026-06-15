@@ -469,16 +469,26 @@ async function fetchJson(url) {
   return null;
 }
 
-// 推薦現在該用哪個帳號：在「還有 5hr 空間」的非過期帳號中，
-// 優先挑「週額度最快重置」的（反正快重置了，先把它的週額度用掉），
-// 同樣快時再挑「5hr 剩最多」的（現在最能放手用）。
+// 推薦現在該用哪個帳號：在「還有 5hr 空間」的非過期帳號中，依序比較：
+// 1) 週額度最快重置（反正快重置了，先把它的週額度用掉）
+// 2) 一樣快時挑 5hr 最快重置的（5hr 也快回滿，現在用最划算）
+// 3) 再一樣才挑 5hr 剩最多的（現在最能放手用）
 function recommendAccount(payloads) {
   const v5 = (p) => { const x = p.claude_code && p.claude_code.five_hour && p.claude_code.five_hour.pct; return typeof x === "number" ? x : null; };
   const wkReset = (p) => { const r = p.claude_code && p.claude_code.seven_day && p.claude_code.seven_day.resets_at; const t = r ? new Date(r).getTime() : NaN; return isFinite(t) ? t : Infinity; };
+  const h5Reset = (p) => { const r = p.claude_code && p.claude_code.five_hour && p.claude_code.five_hour.resets_at; const t = r ? new Date(r).getTime() : NaN; return isFinite(t) ? t : Infinity; };
   let pool = payloads.filter(p => !isStale(p) && v5(p) != null && v5(p) < 90); // 5hr 還有空間
   if (!pool.length) pool = payloads.filter(p => !isStale(p) && v5(p) != null); // 都吃緊時退而求其次
   if (!pool.length) return null;
-  pool.sort((a, b) => (wkReset(a) - wkReset(b)) || (v5(a) - v5(b))); // 週重置最快 → 5hr 剩最多
+  // 週重置最快 → 一樣快時 5hr 重置最快 → 再一樣 5hr 剩最多。容差 5 分鐘內視為「一樣快」。
+  const TOL = 5 * 60 * 1000;
+  pool.sort((a, b) => {
+    const dw = wkReset(a) - wkReset(b);
+    if (Math.abs(dw) > TOL) return dw;
+    const d5 = h5Reset(a) - h5Reset(b);
+    if (Math.abs(d5) > TOL) return d5;
+    return v5(a) - v5(b);
+  });
   const best = pool[0];
   return { name: shortName(best.machine),
            wk: wkReset(best) === Infinity ? null : best.claude_code.seven_day.resets_at,
