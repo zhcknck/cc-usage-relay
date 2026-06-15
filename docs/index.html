@@ -229,35 +229,39 @@ function chartStart(points) {
 }
 
 function chartSvg(points) {
-  // 只畫週額度（d7）平滑線：5hr 每 5 小時歸零是鋸齒、畫了只會亂飛，故不畫。
+  // 週額度 d7 直條圖：近 24h 切成 N 段，每條高度 = 該時段的週額度%（緩升 → 遞增柱狀）。
   const W = 320, H = 96, PAD = 6;
   const now = Date.now();
   const t0 = chartStart(points);
   const span = Math.max(now - t0, 60000);
-  const x = (t) => PAD + ((t - t0) / span) * (W - PAD * 2);
-  const y = (pct) => H - PAD - (Math.min(100, Math.max(0, pct)) / 100) * (H - PAD * 2);
-  // 只在週重置斷崖（驟降 >10%）斷線；時間空窗不斷（週額度在關機空窗期間不變，連起來反而乾淨）
-  const pts = points.filter(p => typeof p.d7 === "number" && p.t >= t0);
+  const pts = points.filter(p => typeof p.d7 === "number" && p.t >= t0).sort((a, b) => a.t - b.t);
   if (pts.length < 2) return "";
-  const segs = []; let cur = [], prev = null;
-  for (const p of pts) {
-    if (prev && prev.d7 - p.d7 > 10 && cur.length) { segs.push(cur); cur = []; }
-    cur.push(p); prev = p;
+  const N = 16, bw = span / N;
+  const innerH = H - PAD * 2, slot = (W - PAD * 2) / N, gap = slot * 0.3, barW = slot - gap;
+  // 每段取該時段最後一筆值；該段沒資料就沿用前值（關機空窗期間週額度不變）
+  const bars = []; let last = pts[0].d7, pi = 0;
+  for (let i = 0; i < N; i++) {
+    const end = t0 + (i + 1) * bw; let v = null;
+    while (pi < pts.length && pts[pi].t <= end) { v = pts[pi].d7; pi++; }
+    if (v != null) last = v;
+    bars.push(last);
   }
-  if (cur.length) segs.push(cur);
-  const valid = segs.filter(s => s.length >= 2);
-  if (!valid.length) return "";
-  const p7 = valid.map(s =>
-    "M" + s.map(p => x(p.t).toFixed(1) + " " + y(p.d7).toFixed(1)).join(" L")).join(" ");
-  const grid = (pct) =>
-    `<line x1="${PAD}" y1="${y(pct)}" x2="${W - PAD}" y2="${y(pct)}"
-       stroke="rgba(255,255,255,.08)" stroke-width="1" stroke-dasharray="1 6" vector-effect="non-scaling-stroke"/>`;
-  // vector-effect=non-scaling-stroke：SVG 被橫向拉伸時線寬仍維持一致，不會被壓扁
+  // 自動縮放：最高一條約佔 9 成高度，低用量時也看得出遞增趨勢（絕對 % 看上方進度條）
+  const maxV = Math.max(1, ...bars.map(v => Math.min(100, Math.max(0, v))));
+  const rects = bars.map((v, i) => {
+    const h = Math.max(2, Math.min(100, Math.max(0, v)) / maxV * innerH * 0.92);
+    const x = PAD + i * slot + gap / 2;
+    return `<rect x="${x.toFixed(1)}" y="${(H - PAD - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="url(#barg)"/>`;
+  }).join("");
   return `
     <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      ${grid(50)}${grid(90)}
-      <path d="${p7}" fill="none" stroke="var(--teal)" stroke-width="3"
-        stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      <defs>
+        <linearGradient id="barg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="var(--teal)" stop-opacity="1"/>
+          <stop offset="1" stop-color="var(--teal)" stop-opacity=".5"/>
+        </linearGradient>
+      </defs>
+      ${rects}
     </svg>`;
 }
 
