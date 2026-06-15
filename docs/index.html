@@ -165,10 +165,17 @@
   .chart-wrap .label .k5::before { background: var(--orange); }
   .chart-wrap .label .k7::before { background: var(--teal); }
   .chart-wrap .label .spacer { margin-left: auto; }
-  svg.chart { width: 100%; height: 96px; display: block; }
+  .chart-body { display: flex; align-items: stretch; }
+  .chart-yaxis { position: relative; width: 26px; height: 96px; flex: none; }
+  .chart-yaxis span {
+    position: absolute; right: 5px; transform: translateY(-50%);
+    font-size: 9px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .chart-yaxis span.warn { color: var(--orange); }
+  svg.chart { flex: 1; min-width: 0; width: auto; height: 96px; display: block; }
   .chart-axis {
     display: flex; justify-content: space-between;
-    margin-top: 6px; font-size: 10px; color: var(--muted);
+    margin-top: 6px; padding-left: 26px; font-size: 10px; color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
   .chart-axis span:last-child { color: var(--text); font-weight: 600; }
@@ -399,6 +406,16 @@ function waterBall(p5, idx) {
     </svg>`;
 }
 
+// 走勢圖左側縱軸：百分比刻度（對齊圖內格線；90 標橘色危險線）。
+// top 像素對應 0–100 全幅（圖高 96、上下各留 6）：top = 90 - v*0.84。
+function chartYAxis() {
+  const ticks = [[90, true], [50, false], [0, false]];
+  return `<div class="chart-yaxis">` +
+    ticks.map(([v, warn]) =>
+      `<span class="${warn ? "warn" : ""}" style="top:${(90 - v * 0.84).toFixed(1)}px">${v}</span>`
+    ).join("") + `</div>`;
+}
+
 // 走勢圖底部時間軸：自起點到現在等距標 4 個時刻（含「現在」）。
 function chartAxis(points) {
   const t0 = chartStart(points);
@@ -466,7 +483,10 @@ function renderPayload(p, history, idx) {
     card += `
       <div class="chart-wrap">
         <div class="label"><span class="k5">5hr 用量走勢</span><span class="spacer">近 ${chartHrs}h</span></div>
-        ${chartSvg(points)}
+        <div class="chart-body">
+          ${chartYAxis()}
+          ${chartSvg(points)}
+        </div>
         ${chartAxis(points)}
       </div>`;
   }
