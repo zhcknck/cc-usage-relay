@@ -95,11 +95,20 @@
     font-size: 22px; font-weight: 800; letter-spacing: -.01em;
     display: flex; align-items: center; gap: 9px;
   }
+  /* 圓點預設暗灰；只有「正在使用」的帳號亮橘+發光（脈動），一眼分辨當前帳號 */
   .ctitle .dot {
     width: 11px; height: 11px; border-radius: 50%; flex: none;
-    background: var(--orange); box-shadow: 0 0 10px rgba(255,156,51,.85);
+    background: var(--muted); box-shadow: none;
   }
-  .ctitle.stale .dot { background: var(--muted); box-shadow: none; }
+  .ctitle.on .dot {
+    background: var(--orange); box-shadow: 0 0 10px rgba(255,156,51,.9);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  .ctitle.stale .dot { background: var(--muted); box-shadow: none; animation: none; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 6px rgba(255,156,51,.7); }
+    50% { box-shadow: 0 0 14px rgba(255,156,51,1); }
+  }
   .ctitle .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ctitle .badge {
     font-size: 11px; font-weight: 800; color: #15151a; flex: none;
@@ -421,7 +430,7 @@ function renderPayload(p, history, idx) {
     <div class="card${active ? " active" : ""}">
       <div class="chead">
         <div class="cmeta">
-          <div class="ctitle${stale ? " stale" : ""}">
+          <div class="ctitle${stale ? " stale" : ""}${active ? " on" : ""}">
             <span class="dot"></span><span class="name">${esc(shortName(p.machine))}</span>${active ? '<span class="badge">使用中</span>' : ""}
           </div>
           <div class="csub">${sub}</div>
