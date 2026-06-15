@@ -258,36 +258,44 @@ function chartStart(points) {
 }
 
 function chartSvg(points) {
-  // 5hr 用量走勢（橘線）：0–100 全幅。爬升=有在用、歸零=該視窗重置。
-  // 每 5 小時的重置斷崖（驟降 >10%）或資料空窗（>20 分鐘）就斷線，不硬連成垂直線。
+  // 5hr 用量走勢（橘色直條圖）：0–100 全幅。近 24h 切 N 段，每根高度 = 該時段 5hr%。
+  // 高=快用完、矮=剛重置/沒在用；≥90% 該根轉紅。
   const W = 320, H = 96, PAD = 6;
   const now = Date.now();
   const t0 = chartStart(points);
   const span = Math.max(now - t0, 60000);
-  const x = (t) => PAD + ((t - t0) / span) * (W - PAD * 2);
-  const y = (pct) => H - PAD - (Math.min(100, Math.max(0, pct)) / 100) * (H - PAD * 2);
+  const innerH = H - PAD * 2;
   const pts = points.filter(p => typeof p.h5 === "number" && p.t >= t0).sort((a, b) => a.t - b.t);
   if (pts.length < 2) return "";
-  const segs = []; let cur = [], prev = null;
-  for (const p of pts) {
-    if (prev && (p.t - prev.t > 20 * 60 * 1000 || prev.h5 - p.h5 > 10) && cur.length) {
-      segs.push(cur); cur = [];
-    }
-    cur.push(p); prev = p;
+  const N = 22, bw = span / N;
+  const slot = (W - PAD * 2) / N, gap = slot * 0.32, barW = slot - gap;
+  // 每段取該時段最後一筆值；沒資料的段留 null（空窗不畫柱，呈現斷檔）
+  const bars = []; let pi = 0;
+  for (let i = 0; i < N; i++) {
+    const end = t0 + (i + 1) * bw; let v = null;
+    while (pi < pts.length && pts[pi].t <= end) { v = pts[pi].h5; pi++; }
+    bars.push(v);
   }
-  if (cur.length) segs.push(cur);
-  const valid = segs.filter(s => s.length >= 2);
-  if (!valid.length) return "";
-  const path = valid.map(s =>
-    "M" + s.map(p => x(p.t).toFixed(1) + " " + y(p.h5).toFixed(1)).join(" L")).join(" ");
   const grid = (pct) =>
-    `<line x1="${PAD}" y1="${y(pct).toFixed(1)}" x2="${W - PAD}" y2="${y(pct).toFixed(1)}"
+    `<line x1="${PAD}" y1="${(H - PAD - pct / 100 * innerH).toFixed(1)}" x2="${W - PAD}" y2="${(H - PAD - pct / 100 * innerH).toFixed(1)}"
        stroke="rgba(255,255,255,.08)" stroke-width="1" stroke-dasharray="1 6" vector-effect="non-scaling-stroke"/>`;
+  const rects = bars.map((v, i) => {
+    if (v == null) return "";
+    const h = Math.max(2, Math.min(100, Math.max(0, v)) / 100 * innerH);
+    const x = PAD + i * slot + gap / 2;
+    const fill = v >= 90 ? "var(--red)" : "url(#barg)";
+    return `<rect x="${x.toFixed(1)}" y="${(H - PAD - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="${fill}"/>`;
+  }).join("");
   return `
     <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="barg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="var(--orange)" stop-opacity="1"/>
+          <stop offset="1" stop-color="var(--orange)" stop-opacity=".45"/>
+        </linearGradient>
+      </defs>
       ${grid(50)}${grid(90)}
-      <path d="${path}" fill="none" stroke="var(--orange)" stroke-width="3"
-        stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      ${rects}
     </svg>`;
 }
 
