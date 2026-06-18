@@ -204,10 +204,27 @@ const CHART_HOURS = 24;         // 走勢圖視窗
 
 const HISTORY_RAW_URL = GIST_RAW_URL.replace(/usage\.json$/, "history.json");
 
+// 用量越接近 100% 顏色越紅。5hr：橘→紅；週：青→橘→紅（避免青紅互調的混濁灰褐）。
+const RAMP_START = 50, RAMP_MID = 80;
+const RGB_ORANGE = [255, 156, 51], RGB_TEAL = [60, 197, 174], RGB_RED = [255, 69, 58];
+function mixHex(a, b, t) {
+  t = Math.max(0, Math.min(1, t));
+  const ch = (i) => Math.round(a[i] + (b[i] - a[i]) * t);
+  const hx = (x) => x.toString(16).padStart(2, "0");
+  return "#" + hx(ch(0)) + hx(ch(1)) + hx(ch(2));
+}
+
 function toneVar(pct) {
   if (pct == null) return "var(--muted)";
-  if (pct >= 90) return "var(--red)";
-  return "var(--orange)";   // 橘色主題：未爆統一橘、滿 90 轉紅
+  return mixHex(RGB_ORANGE, RGB_RED, (pct - RAMP_START) / (100 - RAMP_START));   // 橘 → 紅
+}
+
+// 週額度：青 → 橘 → 紅，越接近 100% 越紅（週爆會卡你好幾天，逼近就該醒目）
+function toneWeekly(pct) {
+  if (pct == null) return "var(--muted)";
+  return pct <= RAMP_MID
+    ? mixHex(RGB_TEAL, RGB_ORANGE, (pct - RAMP_START) / (RAMP_MID - RAMP_START))
+    : mixHex(RGB_ORANGE, RGB_RED, (pct - RAMP_MID) / (100 - RAMP_MID));
 }
 
 function shortName(machine) {
@@ -464,10 +481,10 @@ function renderPayload(p, history, idx) {
       </div>
       <div class="bars">
         ${barRow("5hr", p5, toneVar(p5))}
-        ${barRow("Weekly", p7, "var(--teal)")}`;
+        ${barRow("Weekly", p7, toneWeekly(p7))}`;
   for (const [key, label] of [["seven_day_opus", "Weekly · Opus"], ["seven_day_sonnet", "Weekly · Sonnet"]]) {
     const pct = pctOf(cc[key]);
-    if (pct != null) card += barRow(label, pct, "var(--teal)");
+    if (pct != null) card += barRow(label, pct, toneWeekly(pct));
   }
   card += `
       </div>

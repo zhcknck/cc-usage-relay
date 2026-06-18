@@ -38,10 +38,33 @@ const TRACK = new Color("#3a3a3c");
 const CARD_BG = new Color("#1c1c1e");
 const PILL_BG = new Color("#2c2c2e");
 
+// 用量越接近 100% 顏色越紅。低用量維持原色，逼近上限逐漸轉紅，一眼看出有多接近爆掉。
+// 5hr：橘 → 紅（同為暖色，直接漸變即可）
+// 週　：青 → 橘 → 紅（青紅直接互調會經過混濁灰褐，故中間走橘色，全程鮮豔）
+const RAMP_START = 50, RAMP_MID = 80;
+const RGB_ORANGE = [255, 156, 51];   // #ff9c33（5hr 基底）
+const RGB_TEAL   = [60, 197, 174];   // #3cc5ae（週 基底）
+const RGB_RED    = [255, 69, 58];    // #ff453a（上限）
+
+function mixHex(a, b, t) {
+  t = Math.max(0, Math.min(1, t));
+  const ch = (i) => Math.round(a[i] + (b[i] - a[i]) * t);
+  const hx = (x) => x.toString(16).padStart(2, "0");
+  return "#" + hx(ch(0)) + hx(ch(1)) + hx(ch(2));
+}
+
 function tone(pct, stale) {
   if (stale || pct == null) return GRAY;
-  if (pct >= 90) return RED;
-  return ORANGE;
+  return new Color(mixHex(RGB_ORANGE, RGB_RED, (pct - RAMP_START) / (100 - RAMP_START)));
+}
+
+// 週額度配色：青 → 橘 → 紅，越接近 100% 越紅（週爆會卡你好幾天，逼近時就該醒目）
+function weeklyTone(pct, stale) {
+  if (stale || pct == null) return GRAY;
+  const hex = pct <= RAMP_MID
+    ? mixHex(RGB_TEAL, RGB_ORANGE, (pct - RAMP_START) / (RAMP_MID - RAMP_START))
+    : mixHex(RGB_ORANGE, RGB_RED, (pct - RAMP_MID) / (100 - RAMP_MID));
+  return new Color(hex);
 }
 
 // ---------- 資料 ----------
@@ -471,7 +494,7 @@ function renderSmall(widget, p, etaMin, payloads) {
   const p5 = pctOf(cc.five_hour);
   const p7 = pctOf(cc.seven_day);
   const mainColor = tone(p5, stale);
-  const weeklyColor = stale ? GRAY : TEAL;
+  const weeklyColor = weeklyTone(p7, stale);
 
   addHeader(widget, p, stale, accountTitle(p));
   widget.addSpacer(2);
@@ -523,7 +546,7 @@ function renderMedium(widget, p, etaMin, payloads) {
   const p5 = pctOf(cc.five_hour);
   const p7 = pctOf(cc.seven_day);
   const mainColor = tone(p5, stale);
-  const weeklyColor = stale ? GRAY : TEAL;
+  const weeklyColor = weeklyTone(p7, stale);
 
   const outer = widget.addStack();
   outer.topAlignContent();
@@ -564,7 +587,7 @@ function renderMedium(widget, p, etaMin, payloads) {
     const pct = pctOf(cc[key]);
     if (pct == null) continue;
     right.addSpacer(8);
-    addBarGroup(right, label, null, pct, weeklyColor, 176, 4, stale);
+    addBarGroup(right, label, null, pct, weeklyTone(pct, stale), 176, 4, stale);
   }
   right.addSpacer();
   const footer = right.addStack();
@@ -585,7 +608,7 @@ function renderLarge(widget, p, etaMin, payloads) {
   const p5 = pctOf(cc.five_hour);
   const p7 = pctOf(cc.seven_day);
   const mainColor = tone(p5, stale);
-  const weeklyColor = stale ? GRAY : TEAL;
+  const weeklyColor = weeklyTone(p7, stale);
   const W = 304; // 338 - 左右 padding
 
   const top = widget.addStack();
@@ -608,7 +631,7 @@ function renderLarge(widget, p, etaMin, payloads) {
     const pct = pctOf(cc[key]);
     if (pct == null) continue;
     widget.addSpacer(10);
-    addBarGroup(widget, label, null, pct, weeklyColor, W, 6, stale);
+    addBarGroup(widget, label, null, pct, weeklyTone(pct, stale), W, 6, stale);
   }
 
   widget.addSpacer(14);
