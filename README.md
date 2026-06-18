@@ -116,6 +116,10 @@ WSL 內的 Claude Code 需另行配置對應的 bash 觸發指令。
 - `DASHBOARD_URL`：點 widget 要開的網頁（可留空）
 - `MACHINE_NAME`：多機/多帳號時指定顯示哪個來源（留空 = 最新一個）
 
+**免重貼（推薦）**：repo 設 public 後，改貼 `ios/loader.js`（只貼一次）。它每次都從
+GitHub raw 抓最新的 `cc_usage_widget.js` 來跑，之後改 widget 只要 push，下次刷新就生效
+（GitHub raw 有 ~5 分鐘 CDN 快取）；離線/抓失敗時自動退回上次成功的本機快取。
+
 ### 9. Dashboard（GitHub Pages，可選）
 
 1. 改 `docs/index.html` 內的 `GIST_RAW_URL`
