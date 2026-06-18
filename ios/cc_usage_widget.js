@@ -67,6 +67,11 @@ function weeklyTone(pct, stale) {
   return new Color(hex);
 }
 
+// 任一視窗（5hr 或 週）≥90% 都算「該換帳號了」
+function maxedOut(p5, p7) {
+  return (p5 != null && p5 >= 90) || (p7 != null && p7 >= 90);
+}
+
 // ---------- 資料 ----------
 
 async function fetchJsonCached(url, cacheName) {
@@ -299,13 +304,15 @@ function accountTitle(p) {
   return i >= 0 ? m.slice(i + 1) : "Claude Code";
 }
 
-// 當前帳號接近上限時，找其他還有空間（5hr<90）的帳號，剩最多排前面
+// 當前帳號接近上限時，找其他「5hr 與 週 都還有空間（<90）」的帳號，剩最多排前面。
+// 排除週也滿了的——叫你換去一個週爆的帳號等於白換。
 function switchHints(p, payloads, max) {
   return (payloads || [])
     .filter(q => q !== p && !isStale(q))
     .map(q => ({ name: accountTitle(q),
-                 p5: pctOf(q.claude_code && q.claude_code.five_hour) }))
-    .filter(q => typeof q.p5 === "number" && q.p5 < 90)
+                 p5: pctOf(q.claude_code && q.claude_code.five_hour),
+                 p7: pctOf(q.claude_code && q.claude_code.seven_day) }))
+    .filter(q => typeof q.p5 === "number" && q.p5 < 90 && (q.p7 == null || q.p7 < 90))
     .sort((a, b) => a.p5 - b.p5)
     .slice(0, max);
 }
@@ -527,7 +534,7 @@ function renderSmall(widget, p, etaMin, payloads) {
     addDuoText(widget, "5hr 重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
     widget.addSpacer(3);
     // 爆掉（≥90%）且有其他帳號還有空間 → 末行改顯示建議切換，否則顯示週重置
-    const hints = (p5 != null && p5 >= 90) ? switchHints(p, payloads, 1) : [];
+    const hints = maxedOut(p5, p7) ? switchHints(p, payloads, 1) : [];
     if (hints.length) {
       addDuoText(widget, "→ 改用 ", hints[0].name + " " + Math.round(hints[0].p5) + "%", 10, TEAL);
     } else {
@@ -565,7 +572,7 @@ function renderMedium(widget, p, etaMin, payloads) {
   } else {
     addDuoText(left, "重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
   }
-  if (!stale && p5 != null && p5 >= 90) {
+  if (!stale && maxedOut(p5, p7)) {
     const h = switchHints(p, payloads, 1);
     if (h.length) {
       left.addSpacer(3);
@@ -669,7 +676,7 @@ function renderLarge(widget, p, etaMin, payloads) {
     bt.font = Font.boldSystemFont(11);
     bt.textColor = ORANGE;
     bt.lineLimit = 1;
-  } else if (!stale && p5 != null && p5 >= 90) {
+  } else if (!stale && maxedOut(p5, p7)) {
     // 已達上限：改顯示「建議切換」提示框（青色）
     const hints = switchHints(p, payloads, 2);
     if (hints.length) {
