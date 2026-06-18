@@ -173,25 +173,22 @@ function isStale(p) {
   return !isFinite(t) || (Date.now() - t) > STALE_MINUTES * 60 * 1000;
 }
 
-// resets_at(UTC) -> 相對時間：<60m "33m"；<24h "3h20m"；其餘 "2d22h"
-function relTime(iso) {
-  if (!iso) return "--";
-  const diff = new Date(iso).getTime() - Date.now();
-  const mins = Math.max(0, Math.floor(diff / 60000));
-  if (mins < 60) return mins + "m";
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (mins < 1440) return m > 0 ? h + "h" + m + "m" : h + "h";
-  const d = Math.floor(h / 24);
-  const hr = h % 24;
-  return hr > 0 ? d + "d" + hr + "h" : d + "d";
-}
-
 function hhmm(iso) {
   const d = new Date(iso);
   if (!isFinite(d.getTime())) return "--:--";
   const p = (n) => (n < 10 ? "0" : "") + n;
   return p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+// resets_at(UTC) -> 本地時刻；今天重置只顯 "HH:MM"，跨天加 "M/D (週X)"
+function clockDay(iso) {
+  const d = new Date(iso);
+  if (!isFinite(d.getTime())) return "--:--";
+  const p = (n) => (n < 10 ? "0" : "") + n;
+  const t = p(d.getHours()) + ":" + p(d.getMinutes());
+  const now = new Date();
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return t;
+  return (d.getMonth() + 1) + "/" + d.getDate() + " (" + "日一二三四五六"[d.getDay()] + ") " + t;
 }
 
 function pctOf(block) {
@@ -422,7 +419,7 @@ function renderRectangular(widget, p, etaMin) {
   big.font = Font.heavySystemFont(18);
   big.lineLimit = 1;
   row1.addSpacer();
-  const rst = row1.addText("↻" + relTime(cc.five_hour && cc.five_hour.resets_at));
+  const rst = row1.addText("↻" + hhmm(cc.five_hour && cc.five_hour.resets_at));
   rst.font = Font.boldSystemFont(12);
   rst.textOpacity = 0.85;
 
@@ -446,7 +443,7 @@ function renderRectangular(widget, p, etaMin) {
   } else if (etaMin != null) {
     line4 = "W " + pctText(p7) + "% · 約" + fmtMinutes(etaMin) + "達上限";
   } else {
-    line4 = "W " + pctText(p7) + "% · 7日 ↻" + relTime(cc.seven_day && cc.seven_day.resets_at);
+    line4 = "W " + pctText(p7) + "% · 7日 ↻" + clockDay(cc.seven_day && cc.seven_day.resets_at);
   }
   const t4 = widget.addText(line4);
   t4.font = Font.systemFont(11);
@@ -460,7 +457,7 @@ function renderCircular(widget, p) {
   const cc = p && p.claude_code;
   const p5 = cc ? pctOf(cc.five_hour) : null;
   const stale = isStale(p);
-  const reset = cc ? relTime(cc.five_hour && cc.five_hour.resets_at) : "--";
+  const reset = cc ? hhmm(cc.five_hour && cc.five_hour.resets_at) : "--";
   const img = widget.addImage(drawRing(76, barRatio(p5), pctText(p5), {
     fill: new Color("#ffffff", 1.0),
     track: new Color("#ffffff", 0.25),
@@ -484,7 +481,7 @@ function renderInline(widget, p, etaMin) {
   } else if (etaMin != null) {
     text = "● CC " + pctText(p5) + "% · " + fmtMinutes(etaMin) + " 達上限";
   } else {
-    text = "● CC " + pctText(p5) + "% · ↻" + relTime(cc.five_hour && cc.five_hour.resets_at);
+    text = "● CC " + pctText(p5) + "% · ↻" + hhmm(cc.five_hour && cc.five_hour.resets_at);
   }
   widget.addText(text);
 }
@@ -531,14 +528,14 @@ function renderSmall(widget, p, etaMin, payloads) {
     const sr = staleReason(p);
     addDuoText(widget, "更新於 ", hhmm(p.updated_at) + (sr ? " · " + sr : ""), 10, GRAY);
   } else {
-    addDuoText(widget, "5hr 重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
+    addDuoText(widget, "5hr 重置 ", hhmm(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
     widget.addSpacer(3);
     // 爆掉（≥90%）且有其他帳號還有空間 → 末行改顯示建議切換，否則顯示週重置
     const hints = maxedOut(p5, p7) ? switchHints(p, payloads, 1) : [];
     if (hints.length) {
       addDuoText(widget, "→ 改用 ", hints[0].name + " " + Math.round(hints[0].p5) + "%", 10, TEAL);
     } else {
-      addDuoText(widget, "週 重置 ", relTime(cc.seven_day && cc.seven_day.resets_at), 10, TEAL);
+      addDuoText(widget, "週 重置 ", clockDay(cc.seven_day && cc.seven_day.resets_at), 10, TEAL);
     }
   }
 }
@@ -570,7 +567,7 @@ function renderMedium(widget, p, etaMin, payloads) {
   } else if (etaMin != null) {
     addDuoText(left, "約 ", fmtMinutes(etaMin) + " 後達上限", 10, ORANGE);
   } else {
-    addDuoText(left, "重置 ", relTime(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
+    addDuoText(left, "重置 ", hhmm(cc.five_hour && cc.five_hour.resets_at), 10, ORANGE);
   }
   if (!stale && maxedOut(p5, p7)) {
     const h = switchHints(p, payloads, 1);
@@ -584,10 +581,10 @@ function renderMedium(widget, p, etaMin, payloads) {
 
   const right = outer.addStack();
   right.layoutVertically();
-  addBarGroup(right, "5hr", "重置 " + relTime(cc.five_hour && cc.five_hour.resets_at),
+  addBarGroup(right, "5hr", "重置 " + hhmm(cc.five_hour && cc.five_hour.resets_at),
     p5, mainColor, 176, 6, stale);
   right.addSpacer(10);
-  addBarGroup(right, "Weekly", "重置 " + relTime(cc.seven_day && cc.seven_day.resets_at),
+  addBarGroup(right, "Weekly", "重置 " + clockDay(cc.seven_day && cc.seven_day.resets_at),
     p7, weeklyColor, 176, 6, stale);
   // Opus / Sonnet 有資料才顯示（細條）
   for (const [key, label] of [["seven_day_opus", "Opus"], ["seven_day_sonnet", "Sonnet"]]) {
@@ -657,9 +654,9 @@ function renderLarge(widget, p, etaMin, payloads) {
     b.font = Font.boldSystemFont(10);
     b.textColor = Color.white();
   };
-  mkPill("5hr 重置 ", relTime(cc.five_hour && cc.five_hour.resets_at));
+  mkPill("5hr 重置 ", hhmm(cc.five_hour && cc.five_hour.resets_at));
   pills.addSpacer(8);
-  mkPill("7日 重置 ", relTime(cc.seven_day && cc.seven_day.resets_at));
+  mkPill("7日 重置 ", clockDay(cc.seven_day && cc.seven_day.resets_at));
   pills.addSpacer();
 
   if (!stale && etaMin != null) {

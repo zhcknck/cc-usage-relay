@@ -238,20 +238,21 @@ function esc(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function relTime(iso) {
-  if (!iso) return "--";
-  const mins = Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 60000));
-  if (mins < 60) return mins + "m";
-  const h = Math.floor(mins / 60), m = mins % 60;
-  if (mins < 1440) return m ? h + "h" + m + "m" : h + "h";
-  const d = Math.floor(h / 24), hr = h % 24;
-  return hr ? d + "d" + hr + "h" : d + "d";
-}
-
 function hhmm(iso) {
   const d = new Date(iso);
   if (!isFinite(d.getTime())) return "--:--";
   return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+// resets_at(UTC) -> 本地時刻；今天重置只顯 "HH:MM"，跨天加 "M/D (週X)"
+function clockDay(iso) {
+  const d = new Date(iso);
+  if (!isFinite(d.getTime())) return "--:--";
+  const z = (n) => String(n).padStart(2, "0");
+  const t = z(d.getHours()) + ":" + z(d.getMinutes());
+  const now = new Date();
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return t;
+  return (d.getMonth() + 1) + "/" + d.getDate() + " (" + "日一二三四五六"[d.getDay()] + ") " + t;
 }
 
 function pctOf(block) {
@@ -489,8 +490,8 @@ function renderPayload(p, history, idx) {
   card += `
       </div>
       <div class="pills">
-        <span class="pill">5hr 重置 <b>${relTime(cc.five_hour && cc.five_hour.resets_at)}</b></span>
-        <span class="pill">7日 重置 <b>${relTime(cc.seven_day && cc.seven_day.resets_at)}</b></span>
+        <span class="pill">5hr 重置 <b>${hhmm(cc.five_hour && cc.five_hour.resets_at)}</b></span>
+        <span class="pill">7日 重置 <b>${clockDay(cc.seven_day && cc.seven_day.resets_at)}</b></span>
       </div>
       ${stale ? "" : burnLine(points, p5, cc.five_hour && cc.five_hour.resets_at)}
       ${stale ? "" : weeklyForecast(points, p7, cc.seven_day && cc.seven_day.resets_at)}
@@ -552,7 +553,7 @@ function renderRecommend(payloads) {
   const box = document.getElementById("recommend");
   const rec = recommendAccount(payloads);
   if (!rec) { box.hidden = true; box.innerHTML = ""; return; }
-  const why = "週額度 " + (rec.wk ? relTime(rec.wk) + " 後重置" : "—") +
+  const why = "週額度 " + (rec.wk ? clockDay(rec.wk) + " 重置" : "—") +
     " · 5hr 剩 " + (rec.p5 == null ? "--" : Math.round(100 - rec.p5)) + "%";
   box.innerHTML =
     '<span class="ico">👉</span>' +
